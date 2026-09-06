@@ -23,7 +23,10 @@ pub fn is_app_url(url: &tauri::Url) -> bool {
             Some("tauri.localhost") | Some("asset.localhost") => true,
             // The Vite dev server only. A release build serves from `tauri://`, so
             // allowing plain localhost there would widen the origin for nothing.
-            Some("localhost") | Some("127.0.0.1") => cfg!(debug_assertions),
+            // `dev` is set by tauri-build (and declared via rustc-check-cfg, so it does
+            // not trip `unexpected_cfgs`); it covers `tauri dev --release`, where
+            // debug_assertions is off but the Vite server is still what's being served.
+            Some("localhost") | Some("127.0.0.1") => cfg!(debug_assertions) || cfg!(dev),
             _ => false,
         },
         _ => false,
