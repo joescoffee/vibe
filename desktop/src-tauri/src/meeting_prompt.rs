@@ -147,6 +147,7 @@ fn is_enabled(app: &tauri::AppHandle) -> bool {
 
 fn create_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
     let window = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("index.html?window=meeting-prompt".into()))
+        .on_navigation(crate::navigation::allow_navigation)
         .inner_size(WIDTH, HEIGHT)
         .decorations(false)
         .resizable(false)

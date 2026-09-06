@@ -11,7 +11,10 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "devtools", "macos-private-api", "tray-icon"] }
+# 2.11.1 is the floor, not a preference: earlier 2.x are affected by GHSA-7gmj-67g7-phm9
+# (CVE-2026-42184), where `is_local_url` matched any `http://<scheme>.*` and let a remote
+# page invoke local-only IPC commands on Windows. Do not relax this back to "2".
+tauri = { version = "2.11.1", features = ["protocol-asset", "devtools", "macos-private-api", "tray-icon"] }
 meeting-detect = { path = "../../crates/meeting-detect" }
 
 # Plugins
