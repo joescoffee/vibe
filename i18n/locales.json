@@ -20,5 +20,6 @@
 	{ "code": "tr-TR", "name": "turkish", "desktop": true, "website": false },
 	{ "code": "vi-VN", "name": "vietnamese", "desktop": true, "website": false },
 	{ "code": "zh-CN", "name": "chinese", "desktop": true, "website": true },
-	{ "code": "zh-HK", "name": "chinese (HK)", "desktop": true, "website": true }
+	{ "code": "zh-HK", "name": "chinese (HK)", "desktop": true, "website": true },
+	{ "code": "zh-TW", "name": "chinese (TW)", "desktop": true, "website": true }
 ]
