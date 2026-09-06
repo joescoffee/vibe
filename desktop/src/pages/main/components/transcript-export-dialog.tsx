@@ -1,7 +1,7 @@
 import { Clipboard, Download, Moon, PilcrowLeft, PilcrowRight, Sun } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useMemo, useRef, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import Markdown from '~/components/markdown'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import jsonLanguage from 'react-syntax-highlighter/dist/esm/languages/prism/json'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
