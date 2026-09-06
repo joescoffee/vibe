@@ -127,9 +127,14 @@ pub async fn download_audio(app_handle: AppHandle, url: String, out_path: String
             "m4a",
             "--ffmpeg-location",
             &ffmpeg_path,
-            &url,
             "-o",
             &out_path,
+            // Everything after `--` is a positional URL, never an option. Without it a
+            // pasted link starting with `-` is parsed as a flag, and yt-dlp's flags
+            // include --exec, --config-location and --downloader. `-o` has to move
+            // ahead of the separator; after it, it would be read as a second URL.
+            "--",
+            &url,
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
