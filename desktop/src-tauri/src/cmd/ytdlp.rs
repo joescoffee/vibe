@@ -94,6 +94,50 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(PathBuf::from(first).extension().and_then(|ext| ext.to_str()), Some("m4a"));
     }
+
+    #[test]
+    fn a_url_that_looks_like_a_flag_stays_a_positional() {
+        // The shape that matters: yt-dlp's --exec runs an arbitrary command.
+        let args = download_args("/ffmpeg", "/tmp/out.m4a", "--exec=touch /tmp/pwned");
+        let separator = args.iter().position(|arg| *arg == "--").expect("`--` separator present");
+
+        assert_eq!(args[separator + 1], "--exec=touch /tmp/pwned");
+        assert_eq!(separator, args.len() - 2, "the URL is the only thing after the separator");
+    }
+
+    #[test]
+    fn the_output_template_is_parsed_as_an_option_not_a_url() {
+        let args = download_args("/ffmpeg", "/tmp/out.m4a", "https://example.com/v");
+        let separator = args.iter().position(|arg| *arg == "--").unwrap();
+        let output = args.iter().position(|arg| *arg == "-o").unwrap();
+
+        assert!(output < separator, "-o after `--` would be read as a second URL");
+        assert_eq!(args[output + 1], "/tmp/out.m4a");
+    }
+}
+
+/// yt-dlp's argv, in the order its documented synopsis requires:
+/// `yt-dlp [OPTIONS] [--] URL [URL...]`.
+///
+/// The `--` is load-bearing. Without it a pasted link beginning with `-` is parsed as an
+/// option, and yt-dlp's option set includes `--exec`, `--config-location` and
+/// `--downloader`. `-o` therefore has to sit *ahead* of the separator; after it, yt-dlp
+/// would read it as a second URL rather than as the output template.
+fn download_args<'a>(ffmpeg_path: &'a str, out_path: &'a str, url: &'a str) -> [&'a str; 12] {
+    [
+        "--progress-template",
+        "{\"progress\": \"%(progress.percent)s\", \"total_bytes\": \"%(progress.total_bytes)s\", \"progress_str\": \"%(progress._percent_str)s\"}\n",
+        "--no-playlist",
+        "-x",
+        "--audio-format",
+        "m4a",
+        "--ffmpeg-location",
+        ffmpeg_path,
+        "-o",
+        out_path,
+        "--",
+        url,
+    ]
 }
 
 #[tauri::command]
@@ -118,19 +162,7 @@ pub async fn download_audio(app_handle: AppHandle, url: String, out_path: String
 
     let mut cmd = std::process::Command::new(path);
     let cmd = cmd
-        .args([
-            "--progress-template",
-            "{\"progress\": \"%(progress.percent)s\", \"total_bytes\": \"%(progress.total_bytes)s\", \"progress_str\": \"%(progress._percent_str)s\"}\n",
-            "--no-playlist",
-            "-x",
-            "--audio-format",
-            "m4a",
-            "--ffmpeg-location",
-            &ffmpeg_path,
-            &url,
-            "-o",
-            &out_path,
-        ])
+        .args(download_args(&ffmpeg_path, &out_path, &url))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 

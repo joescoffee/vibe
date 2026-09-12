@@ -69,6 +69,15 @@ pub fn find_ffmpeg_path() -> Option<PathBuf> {
     None
 }
 
+/// Re-encode `input` to 16 kHz mono PCM at `output`.
+///
+/// `additional_ffmpeg_args` lands in an **option position**, between the codec flags and
+/// the output path. ffmpeg has no `--` end-of-options separator, so there is no way to
+/// mark those tokens as data: whatever goes in is parsed as flags, and an injected `-y`,
+/// `-f` or a second output path takes effect. Every caller passes `None` today. Before
+/// wiring this to `FfmpegOptions::custom_command` — which the settings UI already
+/// collects into `transcription.ffmpegOptions` — the value needs an explicit allowlist,
+/// not a split on whitespace.
 pub fn normalize(input: PathBuf, output: PathBuf, additional_ffmpeg_args: Option<Vec<String>>) -> Result<()> {
     let ffmpeg_path = find_ffmpeg_path().context("ffmpeg not found")?;
     tracing::debug!("ffmpeg path is {}", ffmpeg_path.display());

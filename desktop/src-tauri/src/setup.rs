@@ -130,6 +130,7 @@ pub fn setup(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         let background_launch = cli::is_background_launch();
         // Create main window
         let builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+            .on_navigation(crate::navigation::allow_navigation)
             .inner_size(800.0, 700.0)
             .min_inner_size(800.0, 700.0)
             .center()

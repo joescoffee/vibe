@@ -52,7 +52,10 @@ async function renderPdf(segments: Segment[], direction: 'rtl' | 'ltr') {
 		options: options(direction),
 		labels: { transcript: 'Transcript', summary: 'Summary' },
 	}) as Parameters<typeof renderToBuffer>[0]
-	return renderToBuffer(document)
+	// A plain view rather than the Node Buffer renderToBuffer hands back: every consumer
+	// below wants a Uint8Array, and Buffer is Uint8Array<ArrayBufferLike>, which TypeScript
+	// will not accept where Uint8Array<ArrayBuffer> is expected.
+	return new Uint8Array(await renderToBuffer(document))
 }
 
 async function extractText(pdf: Uint8Array) {

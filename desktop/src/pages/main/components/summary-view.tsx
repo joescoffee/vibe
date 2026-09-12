@@ -1,5 +1,5 @@
 import { ArrowUp, Sparkles, X } from 'lucide-react'
-import Markdown from 'react-markdown'
+import Markdown from '~/components/markdown'
 import { useEffect, useRef, useState } from 'react'
 import { m } from '~/paraglide/messages.js'
 import { Button } from '~/components/ui/button'

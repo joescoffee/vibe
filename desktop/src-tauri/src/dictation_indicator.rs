@@ -39,6 +39,7 @@ fn create_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
         WINDOW_LABEL,
         WebviewUrl::App("index.html?window=dictation-indicator".into()),
     )
+    .on_navigation(crate::navigation::allow_navigation)
     .inner_size(WIDTH, HEIGHT)
     .decorations(false)
     .resizable(false)
