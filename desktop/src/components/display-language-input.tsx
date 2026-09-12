@@ -32,7 +32,9 @@ export function DisplayLanguageInput({ value, onSelect, className }: { value: st
 				code,
 				label: code === getLocale() ? getLocalizedLanguageName(name) : endonym(code),
 				keywords: [name, endonym(code), code.split('-')[0]],
-				flagCode: code.split('-')[0],
+				// The full code, not just the primary subtag: a region-specific flag in FLAGS wins,
+				// and anything without one still falls back to the english name (see flagFor).
+				flagCode: code,
 				flagName: baseName(name),
 			}))
 			.sort((a, b) => a.label.localeCompare(b.label))

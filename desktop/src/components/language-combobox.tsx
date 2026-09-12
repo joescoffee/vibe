@@ -73,6 +73,8 @@ const FLAGS: Record<string, string> = {
 	korean: '🇰🇷',
 	zh: '🇨🇳',
 	chinese: '🇨🇳',
+	// Region-specific, so Taiwan is not shown under the PRC flag.
+	'zh-tw': '🇹🇼',
 	ar: '🇸🇦',
 	arabic: '🇸🇦',
 	he: '🇮🇱',

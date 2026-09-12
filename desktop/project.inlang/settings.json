@@ -22,7 +22,8 @@
 		"tr-TR",
 		"vi-VN",
 		"zh-CN",
-		"zh-HK"
+		"zh-HK",
+		"zh-TW"
 	],
 	"modules": [
 		"https://cdn.jsdelivr.net/npm/@inlang/plugin-message-format@latest/dist/index.js",
