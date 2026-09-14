@@ -170,10 +170,17 @@ export interface ModelOptions {
 const systemIsDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
 const defaultDisplayLanguage = 'en-US'
 
+// whisper's language list has exactly one Chinese entry -- `("zh", "chinese")` in
+// server/crates/whisper-rs/src/lang.rs:6, with no zh-TW, zh-Hant or Traditional variant.
+// The script it emits is decided while decoding, and the only lever is the prompt it is
+// primed with. So Traditional output takes both: `lang: 'zh'` to pick the language, and a
+// Traditional seed here to pick the script. An empty init_prompt drifts to Simplified.
+// Keep the seed generic -- domain vocabulary belongs in the user's own settings, which
+// override this default once they have saved options at all.
 export const DEFAULT_MODEL_OPTIONS: ModelOptions = {
-	init_prompt: '',
+	init_prompt: '以下是繁體中文的逐字稿。',
 	verbose: false,
-	lang: 'en',
+	lang: 'zh',
 	n_threads: 4,
 	temperature: 0.4,
 	max_text_ctx: undefined,
