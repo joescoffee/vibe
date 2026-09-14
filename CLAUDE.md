@@ -111,6 +111,27 @@ and centralised in `desktop/src/lib/config-keys.ts` — add new ones there, not 
 `config-changed` event when it is edited externally. The file holds `model.path`, `models_folder`,
 `api.baseUrl`, handoff device credentials and the LLM API keys, so treat it as sensitive.
 
+## The updater points at this fork, on purpose
+
+`tauri.conf.json` `plugins.updater.endpoints` is the **fork's** releases URL, not
+`thewh1teagle/vibe`. `tauri.conf.json` is strict JSON and cannot carry the comment, so it lives
+here.
+
+This fork carries security patches upstream has not taken: the Tauri bump past CVE-2026-42184, the
+`on_navigation` guard, the markdown-link interception and the yt-dlp `--` separator. The updater
+plugin is still registered (`main.rs:76`) and `providers/updater.tsx:74-87` calls `check()` on
+every launch, so with the upstream endpoint an update offer would eventually appear — and would
+*install*, because the embedded `pubkey` is upstream's and their artifacts validate against it.
+Accepting it replaces a patched build with an unpatched one.
+
+It was latent rather than live: upstream's `latest.json` advertised 3.2.2, the same version as
+this tree, so no prompt fired. It would have fired on upstream's next release.
+
+The fork publishes no releases, so `check()` now gets a 404 and the `catch` at `:83` swallows it.
+That is the intended steady state. Anyone who later publishes releases from this fork must also
+replace `pubkey` — the current one belongs to upstream's signing key, so fork-signed artifacts
+would be rejected.
+
 ## CI reality
 
 Only `lint_rust.yml` runs on pull requests, and only `fmt` + `clippy`. `pnpm test`, `check-types`
