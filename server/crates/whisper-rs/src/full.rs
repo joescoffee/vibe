@@ -607,7 +607,45 @@ pub(crate) fn full(
                     Vec::new()
                 };
             state.prompt_past1 = past1_from_prompt;
-            if !is_no_speech {
+            // Do not let a window that merely repeated the history extend it.
+            //
+            // A confident hallucination -- the subtitle-credit boilerplate Whisper falls back on
+            // over non-speech -- clears every gate that would otherwise stop it. `is_no_speech`
+            // needs avg_logprobs below logprob_thold and the boilerplate scores far above it;
+            // the entropy check at the top of this block only looks at sequences longer than 32
+            // tokens and the boilerplate is a third of that; and the temperature fallback that
+            // would drop the history entirely (HISTORY_CONDITIONING_TEMP_CUTOFF, above) only
+            // runs once a decoder has been marked failed. So the text lands in prompt_past1,
+            // becomes the `<|startofprev|>` prefix for the next window, and makes itself the
+            // likeliest continuation there too. The file finishes as one repeated line, and
+            // audio that decodes perfectly on its own decodes as boilerplate in sequence.
+            //
+            // The shape that gives it away is not the phrase but the repetition: this window's
+            // result is already sitting at the end of the history. Refusing to append it breaks
+            // the cycle at the second occurrence, so the window after that is decoded without
+            // the prefix and can recover. Speech that genuinely repeats a line still reaches
+            // the transcript -- only the conditioning is withheld.
+            let repeats_history = {
+                // Compare the words only. Timestamp tokens carry the window's position, so they
+                // differ every time even when the text is identical, and including them would
+                // make the check never fire.
+                let spoken: Vec<i32> = tokens_cur[..result_len.min(tokens_cur.len())]
+                    .iter()
+                    .map(|token| token.id)
+                    .filter(|id| *id < model.vocab.token_beg)
+                    .collect();
+                let past: Vec<i32> = state
+                    .prompt_past1
+                    .iter()
+                    .copied()
+                    .filter(|id| *id < model.vocab.token_beg)
+                    .collect();
+                !spoken.is_empty() && past.len() >= spoken.len() && past[past.len() - spoken.len()..] == spoken[..]
+            };
+            if repeats_history {
+                tracing::debug!("window repeated the rolling context; not extending it");
+            }
+            if !is_no_speech && !repeats_history {
                 for token in &tokens_cur[..result_len] {
                     state.prompt_past1.push(token.id);
                 }
