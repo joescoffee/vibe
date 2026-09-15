@@ -3,7 +3,7 @@ use eyre::{bail, ContextCompat, Result};
 use rand::distr::Alphanumeric;
 use rand::Rng;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use which::which;
 
@@ -129,6 +129,51 @@ pub fn normalize(input: PathBuf, output: PathBuf, additional_ffmpeg_args: Option
     }
     Ok(())
 }
+
+/// Peak level of `input` in dBFS, via ffmpeg's `volumedetect`.
+///
+/// `None` when ffmpeg is missing or prints nothing parseable -- the caller must treat that
+/// as "unknown", never as "silent", or a probe failure would start rejecting good audio.
+/// Digital silence reports `-91.0` (the 16-bit floor) or no line at all.
+pub fn peak_dbfs(input: &Path) -> Option<f32> {
+    let ffmpeg_path = find_ffmpeg_path()?;
+    let mut cmd = Command::new(ffmpeg_path);
+    cmd.args([
+        "-hide_banner",
+        "-i",
+        input.to_str()?,
+        "-af",
+        "volumedetect",
+        "-f",
+        "null",
+        "-",
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let output = cmd.output().ok()?;
+    parse_max_volume(&String::from_utf8_lossy(&output.stderr))
+}
+
+/// Pulls `max_volume: -41.6 dB` out of volumedetect's report.
+fn parse_max_volume(stderr: &str) -> Option<f32> {
+    stderr.lines().find_map(|line| {
+        let rest = line.split("max_volume:").nth(1)?;
+        rest.trim().strip_suffix(" dB")?.trim().parse::<f32>().ok()
+    })
+}
+
+/// Below this peak there is nothing a speech model can work with, and asking it anyway is
+/// worse than refusing: whisper answers out-of-distribution input with the highest-prior
+/// text in its training data rather than with nothing.
+///
+/// Set at -50 dBFS, which is far under even a distant or badly-gained voice (the quiet
+/// captures that prompted this measured -41 dBFS peak) and far over digital silence.
+pub const SILENCE_PEAK_DBFS: f32 = -50.0;
 
 pub fn merge_wav_files(a: PathBuf, b: PathBuf, dst: PathBuf) -> Result<()> {
     let ffmpeg_path = find_ffmpeg_path().context("ffmpeg not found")?;

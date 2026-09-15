@@ -100,6 +100,22 @@ pub async fn transcribe(
         });
     }
 
+    // Refuse audio there is nothing to hear in. Asking whisper anyway does not return an
+    // empty transcript -- it returns the highest-prior text from its training data, repeated
+    // for the length of the file, with nothing in the log to say the audio was the problem.
+    // A probe that cannot run returns None and is treated as unknown, never as silent.
+    if let Some(peak) = crate::ffmpeg::peak_dbfs(&audio_path) {
+        if peak < crate::ffmpeg::SILENCE_PEAK_DBFS {
+            tracing::warn!("refusing to transcribe {}: peak {peak:.1} dBFS", options.path);
+            return Err(CommandError {
+                code: "silent_audio".to_string(),
+                message: format!(
+                    "No audible speech in this file (peak {peak:.1} dBFS). Check the input device and recording level, then record again."
+                ),
+            });
+        }
+    }
+
     let (client, base_url) = {
         let state = server_state.lock().await;
         let process = state.process.as_ref().ok_or_else(|| CommandError {
@@ -188,6 +204,23 @@ pub async fn transcribe(
         return Err(CommandError {
             code: "internal_error".to_string(),
             message,
+        });
+    }
+
+    if let Some((text, share)) = crate::transcript::degenerate_loop(&segments) {
+        let preview: String = text.chars().take(40).collect();
+        tracing::warn!(
+            "discarding degenerate transcript: {:.0}% consecutive repeats of {preview:?}",
+            share * 100.0
+        );
+        return Err(CommandError {
+            code: "degenerate_output".to_string(),
+            message: format!(
+                "The model looped instead of transcribing -- {:.0}% of consecutive segments repeat the same line ({preview:?}). \
+                 That happens when the audio is too quiet to decode. Turn on loudness normalization in Settings, \
+                 or raise the recording level, and try again.",
+                share * 100.0
+            ),
         });
     }
 
