@@ -209,3 +209,45 @@ pub fn merge_wav_files(a: PathBuf, b: PathBuf, dst: PathBuf) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod peak_tests {
+    use super::*;
+
+    /// Verbatim from `ffmpeg -af volumedetect` on this machine, so the parser is tested
+    /// against what ffmpeg actually prints rather than against what it was assumed to.
+    /// The two lines differ by 18.0 dB, which is what makes the next test able to fail.
+    const REAL_OUTPUT: &str = "[Parsed_volumedetect_0 @ 0x6000036e40c0] mean_volume: -60.1 dB\n[Parsed_volumedetect_0 @ 0x6000036e40c0] max_volume: -42.1 dB";
+
+    #[test]
+    fn the_peak_is_read_from_real_ffmpeg_output() {
+        assert_eq!(parse_max_volume(REAL_OUTPUT), Some(-42.1));
+    }
+
+    #[test]
+    fn mean_volume_is_not_mistaken_for_the_peak() {
+        // mean_volume is -60.1 and comes first in ffmpeg's report; taking it would be wrong
+        // by 18.0 dB, which is the difference between refusing this file and accepting it.
+        assert_eq!(parse_max_volume(REAL_OUTPUT), Some(-42.1));
+        assert_ne!(parse_max_volume(REAL_OUTPUT), Some(-60.1));
+    }
+
+    #[test]
+    fn output_without_the_line_is_unknown_not_silent() {
+        assert_eq!(parse_max_volume("ffmpeg version 8.0\nnothing useful here"), None);
+        assert_eq!(parse_max_volume(""), None);
+    }
+
+    #[test]
+    fn a_loud_file_is_above_the_gate() {
+        let loud = "[Parsed_volumedetect_0 @ 0x0] max_volume: 0.0 dB";
+        assert!(parse_max_volume(loud).unwrap() > SILENCE_PEAK_DBFS);
+    }
+
+    #[test]
+    fn quiet_speech_stays_above_the_gate() {
+        // The captures that prompted the gate measured -41.6 dBFS and must not be refused.
+        let quiet = "[Parsed_volumedetect_0 @ 0x0] max_volume: -41.6 dB";
+        assert!(parse_max_volume(quiet).unwrap() > SILENCE_PEAK_DBFS);
+    }
+}
