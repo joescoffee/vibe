@@ -31,7 +31,7 @@ import {
 } from '~/lib/transcripts-store'
 import type { NamedPath, ProjectSource } from '~/lib/types'
 import { ErrorModalContext } from '~/providers/error-modal'
-import { withoutUnsupportedOptions } from '~/lib/model'
+import { isModelFileUsable, withoutUnsupportedOptions } from '~/lib/model'
 import { type Preference, usePreferenceProvider } from '~/providers/preference'
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
@@ -148,10 +148,21 @@ async function buildSharedOptions(preference: Preference) {
 	const requiresVad = preference.modelMetadata?.capabilities.requires_vad ?? false
 	const needsFolder = preference.diarizeEnabled || preference.stableTimestampsEnabled || requiresVad
 	const modelsFolder = needsFolder ? await invoke<string>('get_models_folder') : null
+	// stable_timestamps is on by default, but the VAD model it needs is only fetched when the
+	// user turns the setting on by hand (model-gates.ts). An install that has never touched the
+	// toggle therefore has the setting without the file, and the server rejects the request
+	// outright ("'vad_model' is required when 'stable_timestamps' is true"). Check the file is
+	// really there and fall back to the plain path if it is not -- a worse transcript beats a
+	// failed one. A model whose capabilities demand VAD keeps its existing behaviour.
+	const vadPath = `${modelsFolder}/${config.vadModelFilename}`
+	const vadReady = preference.stableTimestampsEnabled && (await isModelFileUsable(vadPath))
+	if (preference.stableTimestampsEnabled && !vadReady) {
+		console.warn(`stable timestamps are on but ${config.vadModelFilename} is missing; transcribing without VAD`)
+	}
 	return {
 		...(preference.diarizeEnabled ? { diarize_model: `${modelsFolder}/${config.diarizeModelFilename}` } : {}),
-		...(preference.stableTimestampsEnabled || requiresVad ? { vad_model: `${modelsFolder}/${config.vadModelFilename}` } : {}),
-		...(preference.stableTimestampsEnabled ? { stable_timestamps: true } : {}),
+		...(vadReady || requiresVad ? { vad_model: vadPath } : {}),
+		...(vadReady ? { stable_timestamps: true } : {}),
 	}
 }
 

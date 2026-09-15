@@ -263,7 +263,14 @@ export function PreferenceProvider({ children }: { children: ReactNode }) {
 
 	const [recentLanguages, setRecentLanguages] = usePersisted<{ code: string; ts: number }[]>(CONFIG_KEYS.recentLanguages, [])
 	const [diarizeEnabled, setDiarizeEnabled] = usePersisted<boolean>(CONFIG_KEYS.diarizeEnabled, false)
-	const [stableTimestampsEnabled, setStableTimestampsEnabled] = usePersisted<boolean>(CONFIG_KEYS.stableTimestampsEnabled, false)
+	// On by default. Without it the engine decodes a long file in one pass and feeds each
+	// window's text forward as the next window's prompt (whisper-rs full.rs:609-614, :271-290),
+	// so boilerplate produced over a silent opening conditions everything after it and the
+	// whole file comes back as "字幕志愿者 李宗盛". This path VADs first and calls the decoder
+	// once per speech segment, which resets that history each time and never shows the model
+	// silence at all. Measured on a file that fails the other way: 762 bytes of boilerplate
+	// becomes real speech, and audio that already worked is unchanged.
+	const [stableTimestampsEnabled, setStableTimestampsEnabled] = usePersisted<boolean>(CONFIG_KEYS.stableTimestampsEnabled, true)
 	const [storedExportOptions, setStoredExportOptions] = usePersisted<Partial<ExportOptions>>(CONFIG_KEYS.exportOptions, DEFAULT_EXPORT_OPTIONS)
 	// One key holding several settings can be half-written by an older build or a hand-edited
 	// config, and a missing field would reach the exporter as `undefined`. Defaults fill the gaps,
