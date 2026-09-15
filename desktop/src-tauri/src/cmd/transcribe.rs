@@ -82,7 +82,7 @@ async fn transcribe_error(server_state: &State<'_, Mutex<ServerState>>, error: e
 #[tauri::command]
 pub async fn transcribe(
     app_handle: tauri::AppHandle,
-    options: TranscribeOptions,
+    mut options: TranscribeOptions,
     server_state: State<'_, Mutex<ServerState>>,
 ) -> Result<Transcript, CommandError> {
     // Validate file exists before attempting transcription
@@ -104,6 +104,31 @@ pub async fn transcribe(
     // empty transcript -- it returns the highest-prior text from its training data, repeated
     // for the length of the file, with nothing in the log to say the audio was the problem.
     // A probe that cannot run returns None and is treated as unknown, never as silent.
+    // A pass that begins on non-speech never recovers: whisper locks onto training-data
+    // boilerplate and emits it for the whole file. Start where the talking starts instead, and
+    // shift every timestamp back by what was skipped so the transcript still lines up with the
+    // original recording. `speech_start_secs` returns None unless the head is unambiguous.
+    let skipped_secs = crate::ffmpeg::speech_start_secs(&audio_path).unwrap_or(0.0);
+    let mut trimmed_path: Option<PathBuf> = None;
+    if skipped_secs > 0.0 {
+        let extension = audio_path.extension().and_then(|e| e.to_str()).unwrap_or("wav");
+        let candidate = crate::ffmpeg::get_vibe_temp_folder().join(format!(
+            "{}-from{}s.{extension}",
+            crate::ffmpeg::random_string(10),
+            skipped_secs as u64
+        ));
+        match crate::ffmpeg::trim_from(&audio_path, &candidate, skipped_secs) {
+            Ok(()) => {
+                tracing::info!("skipping {skipped_secs:.0}s of non-speech before transcribing");
+                trimmed_path = Some(candidate);
+            }
+            // Trimming is an optimisation, not a requirement. If it fails, transcribe the
+            // original and let the degenerate-output check catch a loop if one happens.
+            Err(error) => tracing::warn!("could not trim the non-speech head: {error:#}"),
+        }
+    }
+    let skipped_secs = if trimmed_path.is_some() { skipped_secs } else { 0.0 };
+
     if let Some(peak) = crate::ffmpeg::peak_dbfs(&audio_path) {
         if peak < crate::ffmpeg::SILENCE_PEAK_DBFS {
             tracing::warn!("refusing to transcribe {}: peak {peak:.1} dBFS", options.path);
@@ -136,6 +161,10 @@ pub async fn transcribe(
 
     let start = std::time::Instant::now();
 
+    if let Some(path) = trimmed_path.as_ref() {
+        options.path = path.to_string_lossy().into_owned();
+    }
+
     let stream = match crate::server::ServerProcess::transcribe_stream(&client, &base_url, &options).await {
         Ok(stream) => stream,
         Err(e) => return Err(transcribe_error(&server_state, e).await),
@@ -164,8 +193,8 @@ pub async fn transcribe(
                     speaker,
                 } => {
                     let segment = Segment {
-                        start: (start * 100.0) as i64,
-                        stop: (end * 100.0) as i64,
+                        start: ((start + skipped_secs) * 100.0) as i64,
+                        stop: ((end + skipped_secs) * 100.0) as i64,
                         text,
                         speaker,
                     };
@@ -222,6 +251,10 @@ pub async fn transcribe(
                 share * 100.0
             ),
         });
+    }
+
+    if let Some(path) = trimmed_path.as_ref() {
+        std::fs::remove_file(path).ok();
     }
 
     let elapsed = start.elapsed();
