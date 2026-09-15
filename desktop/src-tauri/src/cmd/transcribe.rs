@@ -236,25 +236,18 @@ pub async fn transcribe(
         });
     }
 
+    // Report a loop; never withhold the transcript over one. The measure is a heuristic and
+    // it has already been wrong in the expensive direction: a genuine interview came in at 45%
+    // consecutive repeats -- speakers hesitate and repeat themselves ("有沒有 有沒有"), and
+    // short segments of one or two words collide constantly -- and was thrown away, costing the
+    // user a two-hour transcription that was fine. Boilerplate is visible on screen the moment
+    // it appears and a reader loses nothing by receiving it; a discarded transcript is gone.
     if let Some((text, share)) = crate::transcript::degenerate_loop(&segments) {
         let preview: String = text.chars().take(40).collect();
         tracing::warn!(
-            "discarding degenerate transcript: {:.0}% consecutive repeats of {preview:?}",
+            "transcript looks degenerate: {:.0}% consecutive repeats of {preview:?} -- keeping it anyway",
             share * 100.0
         );
-        return Err(CommandError {
-            code: "degenerate_output".to_string(),
-            message: format!(
-                "The model looped instead of transcribing -- {:.0}% of consecutive segments repeat the same line ({preview:?}). \
-                 That happens when the audio is too quiet to decode. Turn on loudness normalization in Settings, \
-                 or raise the recording level, and try again.",
-                share * 100.0
-            ),
-        });
-    }
-
-    if let Some(path) = trimmed_path.as_ref() {
-        std::fs::remove_file(path).ok();
     }
 
     let elapsed = start.elapsed();

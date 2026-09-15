@@ -132,6 +132,74 @@ mod repetition_tests {
     }
 
     #[test]
+    fn a_genuine_interview_can_look_like_a_loop() {
+        // Why this measure may only warn, and must never gate the transcript.
+        //
+        // Built from a real interview's wording: content sentences interleaved with the
+        // fillers speakers actually repeat ("有沒有 有沒有", "有一點 有一點"). It scores
+        // 34.1%, comfortably over DEGENERATE_REPEAT_SHARE, while the recording it came from
+        // is perfectly good. The transcript that prompted this measured 45%.
+        //
+        // An earlier version returned an error on this score. The queue only persists on the
+        // success path (use-transcribe-queue.ts:428), so the user lost the whole
+        // transcription -- three times, at six to eight minutes each.
+        let texts = [
+            "另外還要請教",
+            "有沒有",
+            "有沒有",
+            "就是說",
+            "有一點",
+            "有一點",
+            "我們國關",
+            "對",
+            "對",
+            "這邊會",
+            "嗯",
+            "嗯",
+            "會不會因為",
+            "有沒有",
+            "有沒有",
+            "觸發金融危機的事情",
+            "有一點",
+            "有一點",
+            "而有差異這樣子",
+            "對",
+            "對",
+            "比如說",
+            "嗯",
+            "嗯",
+            "假設發生了擠兌",
+            "有沒有",
+            "有沒有",
+            "然後這個部分",
+            "有一點",
+            "有一點",
+            "對我們國關的作業有沒有什麼樣的影響",
+            "對",
+            "對",
+            "可以嗎",
+            "嗯",
+            "嗯",
+            "應該是說不定是訊息溝通的量會多",
+            "有沒有",
+            "有沒有",
+            "但是還不至於說會觸發到什麼樣的影響這樣子",
+            "有一點",
+            "有一點",
+            "因為本身應該不會有太大的差別",
+            "對",
+            "對",
+        ];
+
+        let (_, share) = degenerate_loop(&segs(&texts)).expect("the measure does fire on genuine speech");
+        assert!(
+            share > DEGENERATE_REPEAT_SHARE,
+            "the false positive is the point of this test; got {share}"
+        );
+        assert!(share < 0.6, "and it is far from the 99% a real loop reaches: {share}");
+    }
+
+    #[test]
     fn a_short_transcript_is_never_judged() {
         assert!(
             degenerate_loop(&segs(&["yes"; 9])).is_none(),
