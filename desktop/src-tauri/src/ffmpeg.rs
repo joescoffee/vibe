@@ -450,3 +450,20 @@ mod speech_start_tests {
         assert_eq!(parse_rms_levels(out), vec![-120.0, -28.8]);
     }
 }
+
+#[cfg(test)]
+mod real_file_probe {
+    use super::*;
+
+    /// Runs the whole path -- ffmpeg invocation, parsing, detection -- against a file on disk.
+    /// Ignored by default because it needs an actual recording; point VIBE_PROBE_FILE at one.
+    #[test]
+    #[ignore]
+    fn detects_the_lead_in_of_a_file_on_disk() {
+        let Ok(path) = std::env::var("VIBE_PROBE_FILE") else {
+            panic!("set VIBE_PROBE_FILE");
+        };
+        let found = speech_start_secs(Path::new(&path));
+        println!("VIBE_PROBE_RESULT {found:?}");
+    }
+}
