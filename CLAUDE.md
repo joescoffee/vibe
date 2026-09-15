@@ -174,6 +174,20 @@ exists — so changes under `handoff/`, `server/` or `crates/` do not trigger cl
 
 Run `chore ci` locally; do not rely on the PR checks to catch you.
 
+## Troubleshooting
+
+Things that cost hours here once, mostly because the failure looks like a result rather than a
+failure.
+
+| 問題 | 原因 | 解法 |
+|---|---|---|
+| 對 sidecar 的轉錄請求回傳空字串 | server 已死，curl 得到的是連線失敗而非空結果 | 檢查 HTTP 狀態碼；讓 `FAIL` 與 `0 bytes` 印出不同字串，否則兩者無法區分 |
+| 手動啟動的 `vibe-server` 在下一次指令就消失 | 背景行程會在工具呼叫之間被終止 | 啟動、載入模型、發送請求全部放在同一次呼叫內；取得結果後 `kill -0` 再確認一次 |
+| `cargo build` 在 `server/` 直接 panic | `libs/lib` 被 gitignore 且初始不存在，`ggml-rs-sys/build.rs` 選擇 panic 而非略過 | `chore fetch-libs`，或手動取 `libraries-ggml-$(cat server/libs/ggml-version)-r$(cat server/libs/revision)` |
+| 自建 sidecar 的修補突然消失 | 刪掉 `binaries/` 後 `chore build` 會無聲還原上游二進位 | 用 `chore server-build`，不要用 `chore setup` |
+| `cargo build` 在沙箱下 EPERM | build script 無法寫入專案內的 `target/` | 把 `CARGO_TARGET_DIR` 指向 scratchpad |
+| app 自報的 `COMMIT HASH` 落後於 `git HEAD` | `build.rs` 只宣告 `rerun-if-env-changed`，沒把 `.git/HEAD` 列為相依 | 建置前 `touch desktop/src-tauri/build.rs` |
+
 ## Repo-local skills
 
 `.claude/skills/` ships three: `translate` (fans one subagent per locale over `i18n/`), `release`
