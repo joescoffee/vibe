@@ -250,6 +250,14 @@ pub async fn transcribe(
         );
     }
 
+    // The trimmed copy is only ever an input to this call. Leaving it behind costs a duplicate
+    // of the recording -- 56 MB for the two-hour file this was found on -- every single time.
+    if let Some(path) = trimmed_path.as_ref() {
+        if let Err(error) = std::fs::remove_file(path) {
+            tracing::warn!("could not remove the trimmed copy at {}: {error}", path.display());
+        }
+    }
+
     let elapsed = start.elapsed();
     let transcript = Transcript {
         processing_time_sec: elapsed.as_secs(),
