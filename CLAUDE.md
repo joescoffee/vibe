@@ -78,6 +78,39 @@ is why deep links have three separate implementations — `onOpenUrl` (macOS), t
 event (Windows/Linux, app already running), and `invoke('get_argv')` (cold start, currently
 unreachable for exactly this reason).
 
+## The sidecar in `binaries/` is built from this tree, not downloaded
+
+`.server-version` still says `v0.6.10`, and `chore setup` still knows how to fetch that release,
+but the binary staged in `desktop/src-tauri/binaries/` is built from `server/` in this repo. It
+carries a patch to `whisper-rs`'s rolling text context that upstream does not have: a window whose
+words merely repeat the history no longer extends it, which is what stops a hallucination over a
+silent opening from conditioning the rest of a long file into the same repeated line.
+
+So `.server-version` describes the *baseline*, not what ships. To rebuild after touching `server/`:
+
+```bash
+cd server
+cargo build -p vibe-server --release          # needs libs/lib, see below
+cp target/release/vibe-server ../desktop/src-tauri/binaries/vibe-server-aarch64-apple-darwin
+chmod 755 ../desktop/src-tauri/binaries/vibe-server-aarch64-apple-darwin
+```
+
+`chore server-build` does exactly this and takes the target triple as an argument.
+
+Two traps:
+
+- **`server/libs/lib` is gitignored and starts out absent**, and `ggml-rs-sys/build.rs` panics
+  without it rather than skipping. Populate it once with `chore fetch-libs`, or by hand from
+  `libraries-ggml-$(cat server/libs/ggml-version)-r$(cat server/libs/revision)` on the upstream
+  releases page. Nothing else native is built locally — the ggml static libraries are prebuilt and
+  about 1.2 MB.
+- **`chore setup` returns early only while both sidecars are present.** Delete `binaries/` and the
+  next `chore build` silently restores upstream's binary, and the patch is gone with no warning.
+
+`server/` is also outside every lint and test job: `cargo clippy -p whisper-rs` currently fails on
+two pre-existing `chunks_exact` findings in `model.rs` and `model_file.rs` that have nothing to do
+with any of this.
+
 ## Phone handoff
 
 `handoff/` is a PWA that records on a phone and streams audio to the desktop over **iroh** (QUIC
@@ -140,6 +173,20 @@ tasks. Its path filter also lists `.github/workflows/lint.yml` and `cli/src/**`,
 exists — so changes under `handoff/`, `server/` or `crates/` do not trigger clippy either.
 
 Run `chore ci` locally; do not rely on the PR checks to catch you.
+
+## Troubleshooting
+
+Things that cost hours here once, mostly because the failure looks like a result rather than a
+failure.
+
+| 問題 | 原因 | 解法 |
+|---|---|---|
+| 對 sidecar 的轉錄請求回傳空字串 | server 已死，curl 得到的是連線失敗而非空結果 | 檢查 HTTP 狀態碼；讓 `FAIL` 與 `0 bytes` 印出不同字串，否則兩者無法區分 |
+| 手動啟動的 `vibe-server` 在下一次指令就消失 | 背景行程會在工具呼叫之間被終止 | 啟動、載入模型、發送請求全部放在同一次呼叫內；取得結果後 `kill -0` 再確認一次 |
+| `cargo build` 在 `server/` 直接 panic | `libs/lib` 被 gitignore 且初始不存在，`ggml-rs-sys/build.rs` 選擇 panic 而非略過 | `chore fetch-libs`，或手動取 `libraries-ggml-$(cat server/libs/ggml-version)-r$(cat server/libs/revision)` |
+| 自建 sidecar 的修補突然消失 | 刪掉 `binaries/` 後 `chore build` 會無聲還原上游二進位 | 用 `chore server-build`，不要用 `chore setup` |
+| `cargo build` 在沙箱下 EPERM | build script 無法寫入專案內的 `target/` | 把 `CARGO_TARGET_DIR` 指向 scratchpad |
+| app 自報的 `COMMIT HASH` 落後於 `git HEAD` | `build.rs` 只宣告 `rerun-if-env-changed`，沒把 `.git/HEAD` 列為相依 | 建置前 `touch desktop/src-tauri/build.rs` |
 
 ## Repo-local skills
 
