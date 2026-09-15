@@ -159,8 +159,15 @@ async function buildSharedOptions(preference: Preference) {
 	if (preference.stableTimestampsEnabled && !vadReady) {
 		console.warn(`stable timestamps are on but ${config.vadModelFilename} is missing; transcribing without VAD`)
 	}
+	// Same guard for diarization, and it matters more here: the Sortformer model is 147 MB, so an
+	// install that has not fetched it yet is the common case rather than the edge one.
+	const diarizePath = `${modelsFolder}/${config.diarizeModelFilename}`
+	const diarizeReady = preference.diarizeEnabled && (await isModelFileUsable(diarizePath))
+	if (preference.diarizeEnabled && !diarizeReady) {
+		console.warn(`speaker recognition is on but ${config.diarizeModelFilename} is missing; transcribing without it`)
+	}
 	return {
-		...(preference.diarizeEnabled ? { diarize_model: `${modelsFolder}/${config.diarizeModelFilename}` } : {}),
+		...(diarizeReady ? { diarize_model: diarizePath } : {}),
 		...(vadReady || requiresVad ? { vad_model: vadPath } : {}),
 		...(vadReady ? { stable_timestamps: true } : {}),
 	}

@@ -262,7 +262,13 @@ export function PreferenceProvider({ children }: { children: ReactNode }) {
 	})
 
 	const [recentLanguages, setRecentLanguages] = usePersisted<{ code: string; ts: number }[]>(CONFIG_KEYS.recentLanguages, [])
-	const [diarizeEnabled, setDiarizeEnabled] = usePersisted<boolean>(CONFIG_KEYS.diarizeEnabled, false)
+	// On by default: a meeting transcript without speaker labels is a wall of text, and the
+	// segments already carry a speaker index that exports know how to render. Sortformer
+	// separates up to four voices; measured on a two-person interview it split 97 segments
+	// 64/33 with the turn-taking matching the content. buildSharedOptions drops it silently
+	// when the 147 MB model has not been fetched yet, so this default cannot break a fresh
+	// install -- it just does nothing until the model is there.
+	const [diarizeEnabled, setDiarizeEnabled] = usePersisted<boolean>(CONFIG_KEYS.diarizeEnabled, true)
 	// On by default. Without it the engine decodes a long file in one pass and feeds each
 	// window's text forward as the next window's prompt (whisper-rs full.rs:609-614, :271-290),
 	// so boilerplate produced over a silent opening conditions everything after it and the
