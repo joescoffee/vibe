@@ -78,6 +78,39 @@ is why deep links have three separate implementations — `onOpenUrl` (macOS), t
 event (Windows/Linux, app already running), and `invoke('get_argv')` (cold start, currently
 unreachable for exactly this reason).
 
+## The sidecar in `binaries/` is built from this tree, not downloaded
+
+`.server-version` still says `v0.6.10`, and `chore setup` still knows how to fetch that release,
+but the binary staged in `desktop/src-tauri/binaries/` is built from `server/` in this repo. It
+carries a patch to `whisper-rs`'s rolling text context that upstream does not have: a window whose
+words merely repeat the history no longer extends it, which is what stops a hallucination over a
+silent opening from conditioning the rest of a long file into the same repeated line.
+
+So `.server-version` describes the *baseline*, not what ships. To rebuild after touching `server/`:
+
+```bash
+cd server
+cargo build -p vibe-server --release          # needs libs/lib, see below
+cp target/release/vibe-server ../desktop/src-tauri/binaries/vibe-server-aarch64-apple-darwin
+chmod 755 ../desktop/src-tauri/binaries/vibe-server-aarch64-apple-darwin
+```
+
+`chore server-build` does exactly this and takes the target triple as an argument.
+
+Two traps:
+
+- **`server/libs/lib` is gitignored and starts out absent**, and `ggml-rs-sys/build.rs` panics
+  without it rather than skipping. Populate it once with `chore fetch-libs`, or by hand from
+  `libraries-ggml-$(cat server/libs/ggml-version)-r$(cat server/libs/revision)` on the upstream
+  releases page. Nothing else native is built locally — the ggml static libraries are prebuilt and
+  about 1.2 MB.
+- **`chore setup` returns early only while both sidecars are present.** Delete `binaries/` and the
+  next `chore build` silently restores upstream's binary, and the patch is gone with no warning.
+
+`server/` is also outside every lint and test job: `cargo clippy -p whisper-rs` currently fails on
+two pre-existing `chunks_exact` findings in `model.rs` and `model_file.rs` that have nothing to do
+with any of this.
+
 ## Phone handoff
 
 `handoff/` is a PWA that records on a phone and streams audio to the desktop over **iroh** (QUIC
