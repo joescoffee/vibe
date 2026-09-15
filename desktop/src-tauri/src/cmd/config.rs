@@ -12,6 +12,9 @@ pub const API_BASE_URL_KEY: &str = "api.baseUrl";
 /// Config key for the CPU backend build the engine should use. Must match `CONFIG_KEYS.cpuVariant`.
 pub const CPU_VARIANT_KEY: &str = "server.cpuVariant";
 
+/// Config key holding the ffmpeg options object. Must match `CONFIG_KEYS.ffmpegOptions`.
+pub const FFMPEG_OPTIONS_KEY: &str = "transcription.ffmpegOptions";
+
 /// Which build of the engine's CPU backend to run.
 ///
 /// `Auto` lets the engine decide from CPUID. `Baseline` is for a machine that advertises
@@ -59,6 +62,22 @@ pub fn cpu_variant(app_handle: &tauri::AppHandle) -> CpuVariant {
         .and_then(|store| store.get(CPU_VARIANT_KEY))
         .and_then(|value| value.as_str().map(CpuVariant::parse))
         .unwrap_or(CpuVariant::Auto)
+}
+
+/// Whether the user asked for loudness normalization, from `app_config.json`.
+///
+/// Defaults to **true** when unset. A capture that is 40 dB too quiet does not transcribe
+/// as quiet speech -- whisper's mel features land outside the training distribution and the
+/// decoder falls back to the highest-prior text it knows, which for Chinese audio is YouTube
+/// subscribe boilerplate repeated until the file ends. Normalising costs one ffmpeg filter;
+/// not normalising costs the entire transcript, silently.
+pub fn normalize_loudness(app_handle: &tauri::AppHandle) -> bool {
+    app_handle
+        .store(STORE_FILENAME)
+        .ok()
+        .and_then(|store| store.get(FFMPEG_OPTIONS_KEY))
+        .and_then(|value| value.get("normalize_loudness").and_then(|v| v.as_bool()))
+        .unwrap_or(true)
 }
 
 /// Persist the CPU build choice, so a fallback the app made on its own shows in Settings and holds.
