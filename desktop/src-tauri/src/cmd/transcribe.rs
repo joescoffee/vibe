@@ -193,8 +193,8 @@ pub async fn transcribe(
                     speaker,
                 } => {
                     let segment = Segment {
-                        start: ((start + skipped_secs) * 100.0) as i64,
-                        stop: ((end + skipped_secs) * 100.0) as i64,
+                        start: centiseconds(start, skipped_secs),
+                        stop: centiseconds(end, skipped_secs),
                         text,
                         speaker,
                     };
@@ -264,4 +264,46 @@ pub async fn transcribe(
     };
 
     Ok(transcript)
+}
+
+/// A sidecar timestamp, in centiseconds, shifted back onto the original recording.
+///
+/// The sidecar sees only the trimmed file and counts from zero within it, so every timestamp
+/// it reports is short by whatever was skipped. Getting this wrong does not fail loudly -- it
+/// silently slides an entire transcript out of sync with the audio it belongs to.
+fn centiseconds(secs: f64, offset_secs: f64) -> i64 {
+    ((secs + offset_secs) * 100.0) as i64
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::centiseconds;
+
+    #[test]
+    fn an_untrimmed_file_is_left_exactly_where_it_was() {
+        assert_eq!(centiseconds(0.0, 0.0), 0);
+        assert_eq!(centiseconds(4.68, 0.0), 468);
+    }
+
+    #[test]
+    fn a_trimmed_file_is_shifted_by_what_was_skipped() {
+        // The interview this was written for skips 700s; its first subtitle must land at
+        // 11:40 in the original recording, not at 0:00.
+        assert_eq!(centiseconds(0.0, 700.0), 70_000);
+        assert_eq!(centiseconds(4.68, 700.0), 70_468);
+    }
+
+    #[test]
+    fn the_offset_is_added_not_subtracted() {
+        // Subtracting compiles just as well and would put every segment before the recording
+        // started, where a player shows nothing at all.
+        assert!(centiseconds(10.0, 700.0) > centiseconds(10.0, 0.0));
+    }
+
+    #[test]
+    fn the_far_end_of_a_two_hour_file_still_fits() {
+        // 1h51m into a file trimmed at 700s -- the last subtitle of the recording that
+        // prompted this. i64 centiseconds has room to spare; f64 keeps the precision.
+        assert_eq!(centiseconds(6661.0, 700.0), 736_100);
+    }
 }
