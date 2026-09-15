@@ -28,6 +28,16 @@ const EXECUTABLE_NAME: &str = "ffmpeg.exe";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// EBU R128 loudness normalization, matching the filter the settings UI advertises
+/// (`sections/audio-processing.tsx`). Constant args only -- never user input, so it is safe
+/// to splice into the option position that `normalize`'s doc comment warns about.
+///
+/// Known floor: loudnorm gates at -70 LUFS. Below that it measures the input as `-inf`
+/// and applies no gain at all, so this rescues a quiet capture but not a dead one.
+/// Verified on a -60 dB speech sample (lifted to -16.0 LUFS / -1.5 dBTP, on target) and
+/// on a -80 dB one (unchanged, `Input Integrated: -inf LUFS`).
+pub const LOUDNORM_ARGS: [&str; 2] = ["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"];
+
 pub fn get_vibe_temp_folder() -> PathBuf {
     use chrono::Local;
     let current_datetime = Local::now();

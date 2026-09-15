@@ -256,7 +256,9 @@ pub async fn start_record(app_handle: AppHandle, devices: Vec<AudioDevice>, reco
             .unwrap_or_else(get_local_time);
         let temp_dir = get_vibe_temp_folder();
         let normalized = crate::cmd::files::available_path(&temp_dir, &recording_stem, "wav");
-        let output = match crate::ffmpeg::normalize(dst.clone(), normalized.clone(), None) {
+        let loudness = crate::cmd::config::normalize_loudness(&app_handle_clone)
+            .then(|| crate::ffmpeg::LOUDNORM_ARGS.map(str::to_string).to_vec());
+        let output = match crate::ffmpeg::normalize(dst.clone(), normalized.clone(), loudness) {
             Ok(()) if normalized.is_file() => normalized,
             result => {
                 std::fs::remove_file(&normalized).ok();

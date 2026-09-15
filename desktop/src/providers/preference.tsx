@@ -197,7 +197,11 @@ const defaultOptions = {
 	modelPath: null,
 	modelOptions: DEFAULT_MODEL_OPTIONS,
 	ffmpegOptions: {
-		normalize_loudness: false,
+		// Was false while the toggle was not wired to anything; the Rust side has always
+		// defaulted it to true (cmd/transcribe.rs). Quiet capture is the documented trigger
+		// for whisper emitting training-data boilerplate, so the default that protects the
+		// transcript is the right one.
+		normalize_loudness: true,
 		custom_command: null,
 	},
 	ytDlpVersion: null,
