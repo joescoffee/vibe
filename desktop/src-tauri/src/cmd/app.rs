@@ -96,9 +96,40 @@ pub fn get_models_folder(app_handle: tauri::AppHandle) -> Result<PathBuf> {
 #[tauri::command]
 pub fn log_frontend_error(scope: String, message: String) {
     // Bound both: a stack trace or a serialized record could otherwise be megabytes.
-    let scope: String = scope.chars().take(64).collect();
-    let message: String = message.chars().take(2000).collect();
+    let scope = bounded(&scope, 64);
+    let message = bounded(&message, 2000);
     tracing::error!(target: "vibe::frontend", "{scope}: {message}");
+}
+
+/// Truncation for `log_frontend_error`, split out so the bounds can be tested.
+fn bounded(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+#[cfg(test)]
+mod frontend_log_tests {
+    use super::bounded;
+
+    #[test]
+    fn a_short_message_is_untouched() {
+        assert_eq!(bounded("failed to save transcript", 2000), "failed to save transcript");
+    }
+
+    #[test]
+    fn a_long_message_is_cut_to_the_limit() {
+        let long = "x".repeat(5000);
+        assert_eq!(bounded(&long, 2000).chars().count(), 2000);
+    }
+
+    #[test]
+    fn truncation_counts_characters_not_bytes() {
+        // A path or an error can be entirely CJK. Cutting on bytes would split a character and
+        // produce mojibake in the log, or panic on a slice boundary.
+        let cjk = "檔案寫入失敗".repeat(500);
+        let cut = bounded(&cjk, 10);
+        assert_eq!(cut.chars().count(), 10);
+        assert_eq!(cut, "檔案寫入失敗檔案寫入");
+    }
 }
 
 #[tauri::command]
