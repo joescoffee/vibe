@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import * as pathApi from '@tauri-apps/api/path'
 import * as fs from '@tauri-apps/plugin-fs'
 import type { Segment, SpeakerNames } from './transcript'
@@ -17,6 +18,21 @@ import type { Segment, SpeakerNames } from './transcript'
  * Every operation here is best-effort: failures are logged and reported as null/empty so a broken
  * disk, a missing folder or a corrupt file can never break the transcription flow.
  */
+
+/**
+ * Log a failure where someone can find it later.
+ *
+ * Everything in this file is best-effort by design, but "best-effort" was reading as "silent":
+ * the webview console is not bridged to `tracing`, and `get_logs` only reads the tracing file,
+ * so a save that failed and cleaned up after itself left no trace anywhere -- not on disk, not
+ * in the log the user can send. Console output is kept for live debugging; the invoke is what
+ * survives the session.
+ */
+function reportFailure(scope: string, error: unknown, ...context: unknown[]) {
+	console.warn(`${scope}:`, ...context, error)
+	const detail = [...context.map((value) => String(value)), String(error)].join(' ')
+	void invoke('log_frontend_error', { scope, message: detail }).catch(() => undefined)
+}
 
 export const TRANSCRIPTS_FOLDER = 'Vibe'
 export const TRANSCRIPT_EXTENSION = '.vibe.json'
@@ -203,14 +219,14 @@ async function writeRecordAtomic(target: string, record: TranscriptRecord) {
 			try {
 				await fs.rename(backup, target)
 			} catch (rollbackError) {
-				console.error('failed to restore transcript metadata after write failure:', target, rollbackError)
+				reportFailure('failed to restore transcript metadata after write failure', rollbackError, target)
 			}
 			throw error
 		}
 		try {
 			await fs.remove(backup)
 		} catch (error) {
-			console.warn('failed to remove transcript metadata backup:', backup, error)
+			reportFailure('failed to remove transcript metadata backup', error, backup)
 		}
 	} finally {
 		try {
@@ -225,7 +241,7 @@ async function removeFolderBestEffort(folder: string) {
 	try {
 		await fs.remove(folder, { recursive: true })
 	} catch (error) {
-		console.warn('failed to clean incomplete transcript project:', folder, error)
+		reportFailure('failed to clean incomplete transcript project', error, folder)
 	}
 }
 
@@ -288,7 +304,7 @@ export async function saveTranscript(input: SaveTranscriptInput): Promise<SaveTr
 			media = await copySourceMedia(projectFolder, input.sourcePath)
 		} catch (error) {
 			if (input.moveSourceMedia) throw error
-			console.warn('failed to copy imported media; saving its external source path:', input.sourcePath, error)
+			reportFailure('failed to copy imported media; saving its external source path', error, input.sourcePath)
 		}
 		if (input.moveSourceMedia && !media) throw new Error(`Vibe-created media has no usable extension: ${input.sourcePath}`)
 
@@ -304,12 +320,12 @@ export async function saveTranscript(input: SaveTranscriptInput): Promise<SaveTr
 				await fs.remove(input.sourcePath)
 			} catch (error) {
 				// The final project is complete; leaving a staged duplicate is safer than hiding it.
-				console.warn('failed to remove staged media after publishing its project:', input.sourcePath, error)
+				reportFailure('failed to remove staged media after publishing its project', error, input.sourcePath)
 			}
 		}
 		return { recordPath: target, mediaPath: media?.path ?? input.sourcePath }
 	} catch (error) {
-		console.warn('failed to save transcript:', error)
+		reportFailure('failed to save transcript', error)
 		if (projectFolder) await removeFolderBestEffort(projectFolder)
 		return null
 	}
@@ -340,7 +356,7 @@ export async function listTranscripts(projectsPath?: string | null): Promise<Tra
 		}
 		return found.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.path.localeCompare(a.path))
 	} catch (error) {
-		console.warn('failed to list transcripts:', error)
+		reportFailure('failed to list transcripts', error)
 		return []
 	}
 }
@@ -351,7 +367,7 @@ export async function readTranscript(path: string): Promise<TranscriptRecord | n
 		const raw = await fs.readTextFile(path)
 		const parsed: unknown = JSON.parse(raw)
 		if (!isRecord(parsed)) {
-			console.warn('skipping malformed transcript:', path)
+			reportFailure('skipping malformed transcript', path)
 			return null
 		}
 		return {
@@ -370,7 +386,7 @@ export async function readTranscript(path: string): Promise<TranscriptRecord | n
 			thread: parseThread(parsed.thread),
 		}
 	} catch (error) {
-		console.warn('failed to read transcript:', path, error)
+		reportFailure('failed to read transcript', error, path)
 		return null
 	}
 }
@@ -386,7 +402,7 @@ export async function resolveProjectAudio(jsonPath: string, record: TranscriptRe
 		const audioPath = await pathApi.join(await pathApi.dirname(jsonPath), record.audioFile)
 		return (await fs.exists(audioPath)) ? audioPath : null
 	} catch (error) {
-		console.warn('failed to resolve the transcript media copy:', jsonPath, error)
+		reportFailure('failed to resolve the transcript media copy', error, jsonPath)
 		return null
 	}
 }
@@ -403,7 +419,7 @@ export async function updateTranscriptSegments(path: string, segments: Segment[]
 		await writeRecordAtomic(path, { ...record, segments })
 		return true
 	} catch (error) {
-		console.warn('failed to update transcript segments:', path, error)
+		reportFailure('failed to update transcript segments', error, path)
 		return false
 	}
 }
@@ -416,7 +432,7 @@ export async function updateTranscriptSpeakerNames(path: string, speakerNames: S
 		await writeRecordAtomic(path, { ...record, speakerNames })
 		return true
 	} catch (error) {
-		console.warn('failed to update transcript speaker names:', path, error)
+		reportFailure('failed to update transcript speaker names', error, path)
 		return false
 	}
 }
@@ -429,7 +445,7 @@ export async function updateTranscriptThread(path: string, thread: AiThreadEntry
 		await writeRecordAtomic(path, { ...record, thread: thread.length > 0 ? thread : undefined })
 		return true
 	} catch (error) {
-		console.warn('failed to update transcript thread:', path, error)
+		reportFailure('failed to update transcript thread', error, path)
 		return false
 	}
 }
@@ -442,7 +458,7 @@ export async function updateTranscriptSummary(path: string, summary: string): Pr
 		await writeRecordAtomic(path, { ...record, summary })
 		return true
 	} catch (error) {
-		console.warn('failed to update transcript summary:', path, error)
+		reportFailure('failed to update transcript summary', error, path)
 		return false
 	}
 }
@@ -470,7 +486,7 @@ export async function deleteTranscript(path: string): Promise<boolean> {
 		await fs.remove(path)
 		return true
 	} catch (error) {
-		console.warn('failed to delete transcript:', path, error)
+		reportFailure('failed to delete transcript', error, path)
 		return false
 	}
 }
@@ -543,7 +559,7 @@ export async function renameTranscript(path: string, newName: string): Promise<T
 					try {
 						await fs.rename(renamedFolder, projectFolder)
 					} catch (rollbackError) {
-						console.error('failed to roll back transcript project rename:', renamedFolder, rollbackError)
+						reportFailure('failed to roll back transcript project rename', rollbackError, renamedFolder)
 					}
 				}
 				throw error
@@ -574,7 +590,7 @@ export async function renameTranscript(path: string, newName: string): Promise<T
 		await fs.remove(path)
 		return { path: target, name: stem, createdAt: parseStamp(target.slice(0, -TRANSCRIPT_EXTENSION.length)).createdAt, mediaPath: record.sourcePath }
 	} catch (error) {
-		console.warn('failed to rename transcript:', path, error)
+		reportFailure('failed to rename transcript', error, path)
 		return null
 	}
 }

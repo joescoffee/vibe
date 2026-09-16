@@ -269,14 +269,16 @@ export function PreferenceProvider({ children }: { children: ReactNode }) {
 	// when the 147 MB model has not been fetched yet, so this default cannot break a fresh
 	// install -- it just does nothing until the model is there.
 	const [diarizeEnabled, setDiarizeEnabled] = usePersisted<boolean>(CONFIG_KEYS.diarizeEnabled, true)
-	// On by default. Without it the engine decodes a long file in one pass and feeds each
-	// window's text forward as the next window's prompt (whisper-rs full.rs:609-614, :271-290),
-	// so boilerplate produced over a silent opening conditions everything after it and the
-	// whole file comes back as "字幕志愿者 李宗盛". This path VADs first and calls the decoder
-	// once per speech segment, which resets that history each time and never shows the model
-	// silence at all. Measured on a file that fails the other way: 762 bytes of boilerplate
-	// becomes real speech, and audio that already worked is unchanged.
-	const [stableTimestampsEnabled, setStableTimestampsEnabled] = usePersisted<boolean>(CONFIG_KEYS.stableTimestampsEnabled, true)
+	// Off. 50629adf turned this on believing it decoded each speech segment separately; it does
+	// not. Options::stable_timestamps() sets max_chunk_ms to u32::MAX (vad-rs lib.rs:53), which
+	// makes coalesce_bounded's merge test `end - start <= max` true for anything under 1193 hours,
+	// so every speech region collapses into one segment and the engine gets the whole file in a
+	// single full_stream call -- exactly what the setting was supposed to avoid. What it does
+	// change is that the VAD path forwards only should_abort to the engine (whisper-rs
+	// context.rs:133), dropping on_progress and on_new_segment, so a two-hour job sends nothing
+	// over the socket until it ends: 213-335 progress events became 1. The hallucination fix that
+	// actually works is the engine-side one in 0de9a164, and it is independent of this.
+	const [stableTimestampsEnabled, setStableTimestampsEnabled] = usePersisted<boolean>(CONFIG_KEYS.stableTimestampsEnabled, false)
 	const [storedExportOptions, setStoredExportOptions] = usePersisted<Partial<ExportOptions>>(CONFIG_KEYS.exportOptions, DEFAULT_EXPORT_OPTIONS)
 	// One key holding several settings can be half-written by an older build or a hand-edited
 	// config, and a missing field would reach the exporter as `undefined`. Defaults fill the gaps,

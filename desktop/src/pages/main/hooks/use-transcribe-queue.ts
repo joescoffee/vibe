@@ -356,7 +356,18 @@ export function useTranscribeQueue(): TranscribeQueue {
 				language: current.modelOptions.lang,
 				modelPath: current.modelPath,
 			}).then((saved) => {
-				if (!saved) return
+				if (!saved) {
+					// A transcription that finished and then vanished is the worst failure this app
+					// has: the work is done, the user watched it happen, and saveTranscript deleted
+					// its own half-built folder on the way out. Silence here is what made a lost
+					// two-hour transcript look like the app forgetting it. The reason is in the log
+					// now (transcripts-store reportFailure); this is what tells the user to look.
+					setErrorModal?.({
+						open: true,
+						log: `The transcript finished but could not be saved to ${current.projectsPath ?? 'the transcripts folder'}. It is still on screen -- export it before closing. The reason is in the app log.`,
+					})
+					return
+				}
 				// Vibe-owned staging media may be gone now; switch playback to the durable project copy
 				// immediately, before any slower title reconciliation.
 				patch(job.id, { savedPath: saved.recordPath, path: saved.mediaPath })
@@ -374,7 +385,7 @@ export function useTranscribeQueue(): TranscribeQueue {
 				})
 			})
 		},
-		[patch, serializeProjectOperation],
+		[patch, serializeProjectOperation, setErrorModal],
 	)
 
 	const runLoop = useCallback(async () => {

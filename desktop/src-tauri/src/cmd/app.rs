@@ -84,6 +84,23 @@ pub fn get_models_folder(app_handle: tauri::AppHandle) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Record a frontend failure in the log file the user can actually send us.
+///
+/// The webview's console is a dead end: nothing bridges it to `tracing`, and `get_logs` reads
+/// only the tracing file. So every `console.warn` in transcripts-store.ts -- including the one
+/// that fires when saving a finished transcript fails and deletes its own half-built folder --
+/// is invisible in a bug report. A transcription that succeeded and then vanished left no
+/// evidence anywhere on the machine.
+///
+/// Message only, no paths interpreted, no side effects beyond the log line.
+#[tauri::command]
+pub fn log_frontend_error(scope: String, message: String) {
+    // Bound both: a stack trace or a serialized record could otherwise be megabytes.
+    let scope: String = scope.chars().take(64).collect();
+    let message: String = message.chars().take(2000).collect();
+    tracing::error!(target: "vibe::frontend", "{scope}: {message}");
+}
+
 #[tauri::command]
 pub fn get_logs(app_handle: tauri::AppHandle) -> Result<String> {
     let path = crate::logging::get_log_path(&app_handle)?;

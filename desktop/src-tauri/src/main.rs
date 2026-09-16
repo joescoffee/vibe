@@ -134,6 +134,7 @@ async fn main() -> Result<()> {
             cmd::app::is_online,
             cmd::files::get_path_dst,
             cmd::app::get_logs,
+            cmd::app::log_frontend_error,
             cmd::files::open_path,
             cmd::files::get_save_path,
             cmd::files::get_argv,
