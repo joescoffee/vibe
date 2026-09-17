@@ -467,7 +467,18 @@ export function useTranscribeQueue(): TranscribeQueue {
 						// re-read the live path so completion can never target the folder's old name.
 						void serializeProjectOperation(next.id, async () => {
 							const savedPath = jobsRef.current.find((candidate) => candidate.id === next.id)?.savedPath
-							if (savedPath && (await updateTranscriptSegments(savedPath, result.segments))) notifyTranscriptsChanged()
+							if (savedPath && (await updateTranscriptSegments(savedPath, result.segments))) {
+								notifyTranscriptsChanged()
+								return
+							}
+							// Re-running a project whose folder has since been moved or deleted lands here.
+							// updateTranscriptSegments already logged any thrown reason, but a missing record
+							// returns false without throwing, so this is the only place the user can learn
+							// that a finished transcription went nowhere.
+							setErrorModal?.({
+								open: true,
+								log: `The transcript finished but could not be written back to ${savedPath ?? 'its project folder'}. It is still on screen -- export it before closing. Any reason is in the app log.`,
+							})
 						})
 					} else {
 						persist(next, result.segments)
