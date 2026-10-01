@@ -282,6 +282,11 @@ def cmd_doctor(args) -> None:
 
     failing = {check_id for state, check_id, _ in checks if state != "PASS"}
     override = None
+    if args.override and not failing:
+        emit("BLOCKED", "gate2.doctor", rc=1,
+             detail="--override was given but every check passed; an override that waives nothing "
+                    "is noise in the record. Drop the flag.",
+             source=str(verdict_path))
     if args.override:
         unwaivable = sorted(failing - OVERRIDABLE_CHECKS)
         if unwaivable:
