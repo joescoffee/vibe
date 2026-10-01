@@ -35,10 +35,20 @@ cd desktop && pnpm exec vitest run src/lib/transcript-export.test.ts
 cd desktop && pnpm exec vitest run -t 'escapes HTML data'      # by test name
 ```
 
-There is no vitest config — it runs on defaults. Tests needing DOM opt in per-file with a
-`// @vitest-environment jsdom` docblock on line 1. Mock Tauri per-file with
-`vi.mock('@tauri-apps/api/core', …)`; `src/mock-tauri/` is **not** a test harness — it exists only
-for `chore dev-web` and no test imports it.
+Vitest reads `vite.config.ts`, whose `test` block sets exactly one thing: `setupFiles`. Everything
+else is on vitest's defaults, and tests still opt into a DOM per-file with a
+`// @vitest-environment jsdom` docblock on line 1 — no global environment is configured. Do **not**
+add a separate `vitest.config.ts`: it shadows `vite.config.ts` rather than merging with it, and the
+`~` alias and the paraglide plugin disappear with it.
+
+`vitest.setup.ts` exists for one reason. Node 25 defines `globalThis.localStorage` itself, and
+vitest's `populateGlobal` only copies a window property over an existing global when the key is on
+its own KEYS list — `localStorage` is not on it. So jsdom's real `Storage` never reaches the global
+and tests get Node's object, which has no `clear`. The setup file puts a real jsdom `Storage` back.
+It is the only global affected; a probe over every jsdom window property found one mismatch.
+
+Mock Tauri per-file with `vi.mock('@tauri-apps/api/core', …)`; `src/mock-tauri/` is **not** a test
+harness — it exists only for `chore dev-web` and no test imports it.
 
 **Rust tests are never executed by any tooling.** No `chore` task and no workflow runs `cargo test`,
 so the ~120 existing `#[test]` functions are documentation until someone adds a runner. Write them
