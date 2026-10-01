@@ -11,8 +11,11 @@ require 1.6.0
 # which is also why an included task can write `cd handoff/wasm`.
 #
 # The Python scripts under scripts/ are still the programs they always were --
-# these tasks call them, they do not reimplement them. CI calls the same tasks,
-# so a green local run means the same commands ran.
+# these tasks call them, they do not reimplement them. CI calls these same tasks,
+# split across three workflows so a change pays only for what it touches:
+# lint_rust.yml (Rust), ci.yml (frontend and i18n) and server-tests.yml. Between
+# them every task in `ci` runs on a pull request, so a green local run means the
+# same commands ran.
 
 include handoff/handoff.chore
 include website/website.chore
@@ -164,6 +167,26 @@ task test {
     pnpm test
 }
 
+# Run the Rust tests in the root workspace: desktop/src-tauri and crates/.
+#
+# These used to be dead weight -- no task and no workflow ran `cargo test`, so the
+# #[test] functions were documentation. They are a gate now, so a red one blocks.
+# `server/` is a separate workspace and is excluded from the root, so it needs its
+# own task below.
+task test-rust {
+    cargo test --manifest-path Cargo.toml --all
+}
+
+# Run the Rust tests in the server workspace.
+#
+# Kept out of `ci` on purpose: this builds the ggml bindings, which is minutes rather
+# than seconds, and needs `chore fetch-libs` first or ggml-rs-sys/build.rs panics.
+# CI runs it as its own job.
+task test-server {
+    cd server
+    cargo test --all
+}
+
 # Lint the frontend and Rust, with the flags CI uses.
 task lint {
     cd desktop
@@ -182,9 +205,15 @@ task format {
     cargo fmt
 }
 
-# Regenerate the i18n files.
+# Regenerate the i18n files for both apps.
+#
+# Both src/paraglide/ directories are gitignored, and `check-types` runs tsc over
+# desktop *and* website -- so generating only one of them leaves a fresh clone
+# unable to type-check. This used to do desktop alone.
 task i18n {
     cd desktop
+    pnpm i18n:generate
+    cd $ROOT/website
     pnpm i18n:generate
 }
 
@@ -209,4 +238,5 @@ task ci {
     check-types
     check-i18n
     test
+    test-rust
 }

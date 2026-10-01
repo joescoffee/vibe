@@ -50,9 +50,14 @@ It is the only global affected; a probe over every jsdom window property found o
 Mock Tauri per-file with `vi.mock('@tauri-apps/api/core', …)`; `src/mock-tauri/` is **not** a test
 harness — it exists only for `chore dev-web` and no test imports it.
 
-**Rust tests are never executed by any tooling.** No `chore` task and no workflow runs `cargo test`,
-so the ~120 existing `#[test]` functions are documentation until someone adds a runner. Write them
-if they earn their place, but do not treat one as a regression guard.
+The Rust tests **are** a gate now, which they were not until recently. `chore test-rust` runs the
+root workspace (desktop/src-tauri + crates/, 109 tests) and is part of `chore ci`; `chore
+test-server` runs the separate `server/` workspace (39 tests) and is kept out of `chore ci` because
+it compiles the ggml bindings. A red one blocks a pull request, so treat them as regression guards.
+
+`cargo test` on the root workspace needs the sidecars present — `tauri_build` validates
+`externalBin`, so an empty `binaries/` fails the build script outright. It does **not** need the
+frontend dist.
 
 ## Two Cargo workspaces, deliberately
 
@@ -177,12 +182,24 @@ would be rejected.
 
 ## CI reality
 
-Only `lint_rust.yml` runs on pull requests, and only `fmt` + `clippy`. `pnpm test`, `check-types`
-and `check-i18n` have no CI counterpart despite the `chorefile` comment claiming CI calls the same
-tasks. Its path filter also lists `.github/workflows/lint.yml` and `cli/src/**`, neither of which
-exists — so changes under `handoff/`, `server/` or `crates/` do not trigger clippy either.
+Three workflows run on pull requests, split so a change pays only for what it touches:
 
-Run `chore ci` locally; do not rely on the PR checks to catch you.
+| Workflow | Fires on | Runs |
+|---|---|---|
+| `lint_rust.yml` | `desktop/src-tauri/**`, `crates/**`, root `Cargo.*` | `cargo fmt`, `clippy -D warnings`, `cargo test --all` |
+| `ci.yml` | `desktop/src/**`, `i18n/**`, `website/**`, `scripts/**`, `chorefile` | eslint, `chore check-types`, `chore check-i18n`, `chore test` |
+| `server-tests.yml` | `server/**` | `chore fetch-libs`, then `cargo test --all` in that workspace |
+
+Together they cover every task in `chore ci`. `ci.yml` runs the tasks individually rather than
+calling `chore ci`, because that task's `lint` also shells out to cargo — which belongs to
+`lint_rust.yml` and needs the sidecars.
+
+This was not true until recently: the only PR workflow was `lint_rust.yml`, its path filter listed
+`.github/workflows/lint.yml` and `cli/src/**` (neither of which exists), and nothing ran `pnpm
+test`, `check-types`, `check-i18n` or `cargo test` at all.
+
+`chore ci` locally still runs more in one go than any single workflow does, so it remains the
+fastest way to find out.
 
 ## Troubleshooting
 

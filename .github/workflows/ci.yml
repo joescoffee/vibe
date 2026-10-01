@@ -1,0 +1,86 @@
+name: CI
+
+# The frontend and i18n half of `chore ci`. The Rust half -- fmt, clippy and
+# cargo test over the root workspace -- is lint_rust.yml, and `server/` is a
+# separate workspace with its own workflow. Between the three, every task in
+# `chore ci` runs on a pull request.
+#
+# Paths deliberately exclude desktop/src-tauri/**, which is lint_rust.yml's
+# trigger: a Rust-only change should not pay for a frontend run.
+
+on:
+    pull_request:
+        paths:
+            - 'desktop/src/**'
+            - 'desktop/package.json'
+            - 'desktop/pnpm-lock.yaml'
+            - 'desktop/vite.config.ts'
+            - 'desktop/vitest.setup.ts'
+            - 'desktop/tsconfig*.json'
+            - 'i18n/**'
+            - 'website/**'
+            - 'scripts/**'
+            - 'chorefile'
+            - '.github/workflows/ci.yml'
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    frontend:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: setup pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  package_json_file: desktop/package.json
+
+            - name: setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+                  cache-dependency-path: desktop/pnpm-lock.yaml
+
+            - name: setup chore
+              uses: getchore/setup-chore@v1
+              with:
+                  version: v1.6.0
+
+            - name: install uv
+              uses: astral-sh/setup-uv@v5
+
+            - name: install node deps (desktop)
+              run: pnpm install
+              working-directory: ./desktop
+
+            # check-types runs tsc over desktop *and* website, and the two have separate
+            # node_modules -- this is not a pnpm workspace.
+            - name: install node deps (website)
+              run: pnpm install
+              working-directory: ./website
+
+            # Both src/paraglide/ directories are gitignored, so a fresh checkout cannot
+            # type-check or run the tests until they are compiled.
+            - name: generate i18n
+              run: chore i18n
+
+            # Individually rather than `chore ci`, whose `lint` task also runs cargo
+            # fmt and clippy -- that is lint_rust.yml's job and needs the sidecars.
+            - name: eslint
+              run: pnpm lint
+              working-directory: ./desktop
+
+            - name: check types
+              run: chore check-types
+
+            - name: check i18n
+              run: chore check-i18n
+
+            - name: test
+              run: chore test

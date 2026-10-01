@@ -1,0 +1,56 @@
+name: Test Server
+
+# `server/` is its own cargo workspace -- the root Cargo.toml lists it under
+# `exclude` -- so lint_rust.yml's `cargo test --manifest-path Cargo.toml --all`
+# does not reach it. This workflow is the only thing that runs those tests.
+#
+# Separate from ci.yml and lint_rust.yml because it is the expensive one: the ggml
+# bindings have to compile, and that is minutes rather than seconds. It therefore
+# fires only when server/ actually changes.
+#
+# Not to be confused with server-test.yml, which smoke-tests an already released
+# binary and runs on workflow_dispatch only.
+
+on:
+    pull_request:
+        paths:
+            - 'server/**'
+            - '.github/workflows/server-tests.yml'
+    workflow_dispatch:
+
+env:
+    RUST_BACKTRACE: 1
+    CARGO_PROFILE_DEV_DEBUG: 0
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+defaults:
+    run:
+        working-directory: server
+
+jobs:
+    test:
+        runs-on: macos-latest
+
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+
+            - name: Setup chore
+              uses: getchore/setup-chore@v1
+              with:
+                  version: v1.6.0
+
+            # server/libs/lib is gitignored and starts out absent, and
+            # ggml-rs-sys/build.rs panics rather than skipping when it is missing.
+            - name: Download prebuilt GGML libs
+              run: chore fetch-libs
+
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: server
+
+            - name: run cargo test
+              run: cargo test --all

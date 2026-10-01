@@ -6,9 +6,11 @@ on:
     #     - main
     pull_request:
         paths:
-            - '.github/workflows/lint.yml'
+            - '.github/workflows/lint_rust.yml'
             - 'desktop/src-tauri/**'
-            - 'cli/src/**'
+            - 'crates/**'
+            - 'Cargo.toml'
+            - 'Cargo.lock'
     workflow_dispatch:
 
 env:
@@ -74,3 +76,29 @@ jobs:
 
             - name: run Clippy
               run: cargo clippy --manifest-path Cargo.toml --all-targets -- -D warnings
+
+    test:
+        runs-on: macos-latest
+
+        steps:
+            - uses: actions/checkout@v4
+            - name: install Rust stable
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: setup chore
+              uses: getchore/setup-chore@v1
+              with:
+                  version: v1.6.0
+
+            # Not optional: tauri_build validates `externalBin`, so the build script fails
+            # outright on an empty binaries/. The frontend dist is *not* needed -- verified
+            # by running the suite with desktop/dist moved aside.
+            - name: Fetch the sidecars
+              run: chore setup
+
+            - uses: Swatinem/rust-cache@v2
+
+            # desktop/src-tauri and crates/. `server/` is a separate workspace with its own
+            # workflow, because it needs the prebuilt ggml libraries first.
+            - name: run cargo test
+              run: cargo test --manifest-path Cargo.toml --all
