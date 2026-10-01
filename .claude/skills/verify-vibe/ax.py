@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from evidence import Blocked, emit, pid_of, run_shell
+from evidence import Blocked, emit, pid_of, require_gate2, run_shell
 
 
 WINDOW_TITLE = "Vibe"
@@ -246,6 +246,7 @@ def cmd_dump(args) -> None:
 
 def cmd_press(args) -> None:
     run = Path(args.run).resolve()
+    require_gate2(run, "press")
     pid = pid_of(run)
     mode, needle = _selector(args)
     result = osascript(_PRESS, [str(pid), mode, needle], run, f"press-{mode}")
@@ -294,6 +295,7 @@ def _selector(args) -> tuple[str, str]:
 
 def cmd_open_panel(args) -> None:
     run = Path(args.run).resolve()
+    require_gate2(run, "open-panel")
     pid = pid_of(run)
     path = Path(args.path).resolve()
     if not path.is_file():

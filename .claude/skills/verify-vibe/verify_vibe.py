@@ -34,9 +34,9 @@ from ax import (  # noqa: E402
     cmd_dump, cmd_exists, cmd_open_panel, cmd_press, osascript,
 )
 from evidence import (  # noqa: E402
-    APP_BINARY, APP_PGREP, CONFIG_DIR, Blocked, Failed, alive, cmd_frontend_errors,
-    cmd_fs_snapshot, emit, launch_start, log_entries, newest_log, pid_of, read_config,
-    run_shell,
+    APP_BINARY, APP_PGREP, CONFIG_DIR, OVERRIDABLE_CHECKS, Blocked, Failed, alive,
+    cmd_frontend_errors, cmd_fs_snapshot, emit, launch_start, log_entries, newest_log,
+    pid_of, read_config, run_shell, write_gate2,
 )
 
 READINESS_MARKERS = {
@@ -279,8 +279,23 @@ def cmd_doctor(args) -> None:
 
     worst = "BLOCKED" if any(c[0] == "BLOCKED" for c in checks) else (
         "FAIL" if any(c[0] == "FAIL" for c in checks) else "PASS")
+
+    failing = {check_id for state, check_id, _ in checks if state != "PASS"}
+    override = None
+    if args.override:
+        unwaivable = sorted(failing - OVERRIDABLE_CHECKS)
+        if unwaivable:
+            emit("BLOCKED", "gate2.doctor", rc=1,
+                 detail=f"--override cannot waive {unwaivable}; only {sorted(OVERRIDABLE_CHECKS)} "
+                        "may be driven through knowingly",
+                 source=str(verdict_path))
+        override = {"reason": args.override, "waived": sorted(failing)}
+        with verdict_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"OVERRIDE gate2.doctor — waived {sorted(failing)}: {args.override}\n")
+
+    marker = write_gate2(run, worst, checks, override)
     emit(worst, "gate2.doctor", rc=0, checks=[{"verdict": v, "id": i, "detail": d} for v, i, d in checks],
-         source=str(verdict_path))
+         override=override, source=str(verdict_path), gate=str(marker))
 
 
 
@@ -400,6 +415,8 @@ def main() -> None:
     p = with_run(sub.add_parser("doctor"))
     p.add_argument("--expect-commit", default=None)
     p.add_argument("--projects", default=None)
+    p.add_argument("--override", default=None, metavar="REASON",
+                   help="drive on through a waivable failure, recorded in verdict.txt")
     p.set_defaults(func=cmd_doctor)
 
     p = with_run(sub.add_parser("dump"))

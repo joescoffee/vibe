@@ -109,6 +109,48 @@ def launch_start(run: Path) -> str | None:
     return json.loads(marker.read_text(encoding="utf-8")).get("start_iso")
 
 
+# Only build.identity may be waived. Everything else that fails means driving would
+# either be impossible or would write somewhere it must not -- and isolation.projects is
+# the one standing between a run and the user's real transcripts.
+OVERRIDABLE_CHECKS = frozenset({"build.identity"})
+
+
+def write_gate2(run: Path, verdict: str, checks: list, override: dict | None) -> Path:
+    """Record gate 2's outcome where the driving commands can find it."""
+    path = run / "gate2.json"
+    path.write_text(json.dumps({
+        "verdict": verdict,
+        "checks": [{"verdict": v, "id": i, "detail": d} for v, i, d in checks],
+        "override": override,
+        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def require_gate2(run: Path, command: str) -> None:
+    """Refuse to drive the app unless gate 2 is green, or was waived on the record.
+
+    The gate used to be advisory. A blind run of this skill drove the app through a
+    FAILED build.identity -- doctor exited 1, the run carried on, and the report read
+    clean. A guard that fires and changes nothing is not a guard.
+    """
+    marker = run / "gate2.json"
+    if not marker.is_file():
+        raise Blocked(f"{command} refused: gate 2 has not run for this run directory. "
+                      f"Run `doctor` first.")
+    state = json.loads(marker.read_text(encoding="utf-8"))
+    if state.get("verdict") == "PASS":
+        return
+    failing = [c["id"] for c in state.get("checks", []) if c["verdict"] != "PASS"]
+    override = state.get("override")
+    if override and set(failing) <= OVERRIDABLE_CHECKS:
+        return
+    unwaivable = sorted(set(failing) - OVERRIDABLE_CHECKS)
+    advice = (f"{unwaivable} cannot be waived." if unwaivable else
+              "Re-run `doctor --override '<reason>'` to proceed on the record.")
+    raise Blocked(f"{command} refused: gate 2 is {state.get('verdict')} on {sorted(failing)}. {advice}")
+
+
 def read_config() -> dict:
     path = CONFIG_DIR / "app_config.json"
     if not path.is_file():

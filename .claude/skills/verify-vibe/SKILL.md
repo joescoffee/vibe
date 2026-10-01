@@ -132,7 +132,33 @@ unless the user has switched the API server on.
 | `isolation.projects` | `transcription.projectsPath` is not the run's directory, or `saveTranscripts` is off |
 
 The last one is not optional. `~/Documents/Vibe` holds the user's real work. A verification run must
-never write there. `config_watcher.rs` reloads external edits live, so `config-set` redirects it
+never write there.
+
+### The gate is enforced, not advisory
+
+`doctor` writes its verdict to `gate2.json`, and `press` and `open-panel` refuse to run unless that
+file says `PASS` — exit 2, no AppleScript sent. `dump` and `exists` stay open on purpose, so a
+failed doctor can still be diagnosed.
+
+This is not belt-and-braces. A blind run of this skill by an agent that had never seen it drove the
+app through a **failed** `build.identity`: doctor exited 1, the run carried on, and the final report
+read clean. The guard fired and changed nothing, which is the exact defect this skill exists to
+catch, in the skill itself.
+
+To proceed through a failure knowingly:
+
+```bash
+$V doctor --run "$RUN" --expect-commit "$(git rev-parse --short=8 HEAD)" --projects "$PROJ" \
+   --override "installed build is N commits behind; those commits touch only CI and docs"
+```
+
+The reason lands in `verdict.txt` as an `OVERRIDE` line and in `gate2.json`, so a reader sees what
+was waived and why instead of having to take the prose on trust.
+
+**Only `build.identity` can be waived.** Driving a knowingly stale build is a defensible call;
+everything else that fails means driving is either impossible or would write where it must not.
+`isolation.projects` in particular is the one check standing between a run and the user's real
+transcripts, and `--override` is refused outright when it is among the failures. `config_watcher.rs` reloads external edits live, so `config-set` redirects it
 **without a relaunch** — which matters precisely because every relaunch destroys a day of logs.
 
 The `pgrep` pattern is anchored (`^…/vibe$`). Unanchored it also matches the `vibe-server` sidecar,
