@@ -218,6 +218,19 @@ failure.
 | `pgrep -f …/vibe` 回報「有兩個 vibe 在跑」 | 同一個 pattern 也命中 `vibe-server` sidecar | 錨定成 `^/Applications/vibe.app/Contents/MacOS/vibe$` |
 | 想重現昨天的 bug，log 卻是空的 | `cleaner.rs` 的清理在 `setup.rs:44`，早於 `:123` 的 CLI 分支——連不開視窗的 `vibe transcribe` 也會刪掉非今日的 log | 任何執行 bundle 的動作之前，先把整個 log 目錄複製到別處（`verify-vibe` 的 gate 0 就是做這件事） |
 
+## pstack playbooks, and the three not to run
+
+`~/.claude/skills/poteto-mode/` ships 23 playbooks. Three of them —
+`autopilot-full`, `autopilot-stack` and `autonomous-run` — state as a precondition that
+`METACOG_MIN_CHARS` be raised or the metacognition Stop hook disabled outright.
+
+Do not run those three here. That hook is not decoration: it caught six "the guard is
+installed but does not detect anything at the highest-risk point" false greens in a single
+day on 2026-10-01, and three more skipped verification steps during the session that built
+`verify-vibe`. Every one of them was a check that would otherwise have been reported green.
+
+The rest of the playbooks have no such precondition and are fine.
+
 ## Repo-local skills
 
 `.claude/skills/` ships three: `translate` (fans one subagent per locale over `i18n/`), `release`
