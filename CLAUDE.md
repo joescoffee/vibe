@@ -187,6 +187,9 @@ failure.
 | 自建 sidecar 的修補突然消失 | 刪掉 `binaries/` 後 `chore build` 會無聲還原上游二進位 | 用 `chore server-build`，不要用 `chore setup` |
 | `cargo build` 在沙箱下 EPERM | build script 無法寫入專案內的 `target/` | 把 `CARGO_TARGET_DIR` 指向 scratchpad |
 | app 自報的 `COMMIT HASH` 落後於 `git HEAD` | `build.rs` 只宣告 `rerun-if-env-changed`，沒把 `.git/HEAD` 列為相依 | 建置前 `touch desktop/src-tauri/build.rs` |
+| 剛啟動 app，讀到的 port 或 `COMMIT HASH` 其實是上一個 session 的 | log 檔名在啟動當下由 `Local::now()` 固定且不輪替；`cleaner.rs` 又刪掉舊檔，使「最新的檔」短暫仍是舊 session 的，其歷史標記照常命中 | 記下啟動時間戳，只採信該時間之後的 log 行；不要用「最新檔」或 `log_$(date +%F).txt` |
+| `pgrep -f …/vibe` 回報「有兩個 vibe 在跑」 | 同一個 pattern 也命中 `vibe-server` sidecar | 錨定成 `^/Applications/vibe.app/Contents/MacOS/vibe$` |
+| 想重現昨天的 bug，log 卻是空的 | `cleaner.rs` 的清理在 `setup.rs:44`，早於 `:123` 的 CLI 分支——連不開視窗的 `vibe transcribe` 也會刪掉非今日的 log | 任何執行 bundle 的動作之前，先把整個 log 目錄複製到別處（`verify-vibe` 的 gate 0 就是做這件事） |
 
 ## Repo-local skills
 
