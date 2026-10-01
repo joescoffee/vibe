@@ -1,0 +1,180 @@
+"""Run-directory plumbing, the three-verdict protocol, and evidence capture.
+
+Imported by verify_vibe.py and ax.py. Holds nothing that knows how to drive a UI.
+"""
+
+from __future__ import annotations
+
+import glob
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+CONFIG_DIR = Path.home() / "Library" / "Application Support" / "github.com.thewh1teagle.vibe"
+APP_BINARY = Path("/Applications/vibe.app/Contents/MacOS/vibe")
+# Anchored: an unanchored pattern also matches the `vibe-server` sidecar, which made
+# the ownership check report "more than one vibe running" on a perfectly normal launch.
+APP_PGREP = f"^{APP_BINARY}$"
+
+class Blocked(Exception):
+    """The check could not run. Distinct from the check running and failing."""
+
+
+class Failed(Exception):
+    """The check ran and the observation did not match the expectation."""
+
+
+# --------------------------------------------------------------------------- plumbing
+
+def emit(verdict: str, check: str, **fields) -> None:
+    payload = {"verdict": verdict, "check": check, **fields}
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    sys.exit({"PASS": 0, "FAIL": 1, "BLOCKED": 2}[verdict])
+
+
+def run_shell(argv: list[str], run: Path | None, step: str, timeout: float = 60.0) -> dict:
+    """Run a command and record argv, rc, stdout, stderr and wall time as separate fields.
+
+    Keeping rc out of the body is the whole point: a connection failure returning zero
+    bytes must not be readable as an empty-but-successful result.
+    """
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        rc, out, err = proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired:
+        rc, out, err = 124, "", f"timed out after {timeout}s"
+    record = {
+        "argv": argv,
+        "rc": rc,
+        "stdout": out,
+        "stderr": err,
+        "wall_ms": round((time.monotonic() - started) * 1000),
+    }
+    if run is not None:
+        shell_dir = run / "shell"
+        shell_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%H%M%S%f")
+        (shell_dir / f"{stamp}-{step}.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    return record
+
+
+def newest_log() -> Path | None:
+    """The log the app is actually appending to.
+
+    The filename is fixed from Local::now() at launch, so a process started yesterday is
+    still writing yesterday's file. Never construct `log_$(date +%F).txt`.
+    """
+    logs = [Path(p) for p in glob.glob(str(CONFIG_DIR / "log_*.txt"))]
+    return max(logs, key=lambda p: p.stat().st_mtime) if logs else None
+
+
+def log_entries(since_iso: str | None = None) -> list[dict]:
+    """Every JSON log entry at or after `since_iso`, across all log files.
+
+    Filtering by timestamp is not optional. clean_old_logs deletes the previous file and
+    the app opens a new one named for the launch date, so "the newest log" right after a
+    launch can still be the *previous* session's file -- and its historical readiness
+    markers will match happily. A run that trusted them reported a dead session's sidecar
+    port as if it were live.
+    """
+    files = [Path(p) for p in glob.glob(str(CONFIG_DIR / "log_*.txt"))]
+    if not files:
+        raise Blocked(f"no log_*.txt in {CONFIG_DIR}")
+    out = []
+    for path in sorted(files, key=lambda p: p.stat().st_mtime):
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if since_iso and entry.get("timestamp", "") < since_iso:
+                continue
+            entry["_file"] = path.name
+            out.append(entry)
+    return out
+
+
+def launch_start(run: Path) -> str | None:
+    marker = run / "launch.json"
+    if not marker.is_file():
+        return None
+    return json.loads(marker.read_text(encoding="utf-8")).get("start_iso")
+
+
+def read_config() -> dict:
+    path = CONFIG_DIR / "app_config.json"
+    if not path.is_file():
+        raise Blocked(f"{path} does not exist")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def pid_of(run: Path) -> int:
+    f = run / "vibe.pid"
+    if not f.is_file():
+        raise Blocked(f"{f} missing -- launch was never run for this run directory")
+    return int(f.read_text().strip())
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+# --------------------------------------------------------------------- AppleScript bodies
+
+
+# ------------------------------------------------------------------ evidence capture
+
+def cmd_frontend_errors(args) -> None:
+    """Any vibe::frontend line is a reportFailure that reached the Rust log."""
+    run = Path(args.run).resolve()
+    entries = log_entries(launch_start(run))
+    hits = [e["fields"]["message"] for e in entries
+            if e.get("target") == "vibe::frontend" and "message" in e.get("fields", {})]
+    out = run / "frontend-errors.json"
+    out.write_text(json.dumps(hits, ensure_ascii=False, indent=2), encoding="utf-8")
+    if hits:
+        emit("FAIL", "log.frontend-silent", rc=0,
+             detail=f"{len(hits)} vibe::frontend line(s): {hits[:3]}", source=str(out))
+    emit("PASS", "log.frontend-silent", rc=0, detail="no vibe::frontend lines", source=str(out))
+
+
+def cmd_fs_snapshot(args) -> None:
+    run = Path(args.run).resolve()
+    root = Path(args.projects).resolve()
+    if not root.is_dir():
+        emit("BLOCKED", f"fs.{args.step}", rc=1, detail=f"{root} does not exist")
+    records = []
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            data = path.read_bytes()
+            records.append({
+                "path": str(path.relative_to(root)),
+                "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest()[:16],
+                "mtime": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+            })
+    out = run / "fs" / f"{args.step}.fs.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    found = [r for r in records if r["path"].endswith("transcript.vibe.json")]
+    if args.expect_records is not None and len(found) != args.expect_records:
+        emit("FAIL", f"fs.{args.step}", rc=0,
+             detail=(f"transcript.vibe.json count={len(found)} of expected={args.expect_records}, "
+                     f"files_total={len(records)}"), source=str(out))
+    emit("PASS", f"fs.{args.step}", rc=0,
+         detail=f"records={len(found)}, files_total={len(records)}", source=str(out))
+
+
