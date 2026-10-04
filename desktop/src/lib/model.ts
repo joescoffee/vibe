@@ -10,7 +10,7 @@ export type ModelExtension = (typeof MODEL_EXTENSIONS)[number]
 
 const MODEL_EXTENSION_PATTERN = new RegExp(`\\.(${MODEL_EXTENSIONS.join('|')})$`, 'i')
 
-type DownloadModelResult = { status: 'completed'; path: string } | { status: 'cancelled' }
+export type DownloadModelResult = { status: 'completed'; path: string } | { status: 'cancelled' }
 
 export function getModelExtension(filename: string): ModelExtension | null {
 	const extension = filename.match(MODEL_EXTENSION_PATTERN)?.[1]?.toLowerCase()

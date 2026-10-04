@@ -249,7 +249,16 @@ async fn download_to_partial(
     });
 
     let operation = async {
-        let client = reqwest::Client::new();
+        // A stalled connection must not hang the download forever: outside the setup screen the
+        // only escape is the Cancel button, and a connection that never delivers a byte also never
+        // reaches the progress callback that makes that button meaningful. `read_timeout` bounds
+        // the gap between bytes rather than the whole transfer, so a slow but live multi-gigabyte
+        // model download is unaffected.
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(60))
+            .build()
+            .context("build the download client")?;
         let response = client.get(url).send().await?.error_for_status()?;
         let content_length = response.content_length().filter(|length| *length > 0);
         let total_size = content_length.unwrap_or(0);

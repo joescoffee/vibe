@@ -5,7 +5,10 @@ import type { AudioDevice } from '~/lib/audio'
 import { CONFIG_KEYS } from '~/lib/config-keys'
 import { usePersisted } from '~/lib/config-store'
 import { KEEP_AWAKE, startKeepAwake, stopKeepAwake } from '~/lib/keep-awake'
-import { ensureSystemAudioPermission } from '~/lib/permissions'
+import { toast } from 'sonner'
+import { m } from '~/paraglide/messages.js'
+import { ensureMicrophonePermission, ensureSystemAudioPermission } from '~/lib/permissions'
+import { isHotkeyRecordingActive, setNormalRecordingActive } from '~/lib/recording-session'
 import { ErrorModalContext } from '~/providers/error-modal'
 import { usePreferenceProvider } from '~/providers/preference'
 
@@ -54,10 +57,19 @@ export function useRecording(onBeforeStart: () => void) {
 	}, [preference.homeTab])
 
 	async function startRecord() {
+		// A dictation already owns the microphone. Starting here opened a second cpal session over
+		// it: `recording-shortcut.tsx` checks this before letting the hotkey start, and this path
+		// did not, so the two could run at once from the UI side.
+		if (isHotkeyRecordingActive()) {
+			toast.error(m.dictationInProgress(), { position: 'bottom-center' })
+			return
+		}
+		if (!(await ensureMicrophonePermission())) return
 		if (outputDevice && !(await ensureSystemAudioPermission())) return
 		startKeepAwake(KEEP_AWAKE.record)
 		onBeforeStart()
 		setIsRecording(true)
+		setNormalRecordingActive(true)
 		const selectedDevices = [inputDevice, outputDevice].filter((device): device is AudioDevice => device !== null)
 		try {
 			await invoke('start_record', {
@@ -67,6 +79,7 @@ export function useRecording(onBeforeStart: () => void) {
 		} catch (error) {
 			stopKeepAwake(KEEP_AWAKE.record)
 			setIsRecording(false)
+			setNormalRecordingActive(false)
 			console.error('startRecord error: ', error)
 			setErrorModal?.({ log: String(error), open: true })
 		}

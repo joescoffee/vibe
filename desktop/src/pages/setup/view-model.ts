@@ -52,8 +52,10 @@ export function viewModel() {
 			kind: 'info',
 		})
 		if (!confirmed) return false
-		await invoke('download_model', { url: config.vadModelUrl, path: vadPath })
-		return true
+		// Cancelling resolves as Ok(Cancelled). Treating that as success selected a model whose
+		// VAD file is not on disk, which then fails at the first transcription instead of here.
+		const result = await invoke<utils.DownloadModelResult>('download_model', { url: config.vadModelUrl, path: vadPath })
+		return result.status === 'completed'
 	}
 
 	async function selectDownloadedModel(modelPath: string) {

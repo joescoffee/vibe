@@ -238,7 +238,15 @@ pub async fn start_api_server(
         // Dropping ServerProcess kills and waits for its child process via its Drop implementation.
         state_guard.process = None;
     }
-    if state_guard.process.is_none() {
+    // `load_model` and `get_model_metadata` both ask whether the cached process is still running
+    // before reusing it; this one did not, and it is the one that writes the port into
+    // `app_config.json`. After a sidecar crash it reported started and published a URL that
+    // refuses connections -- to the Settings toggle, and to the skill installed into
+    // `~/.claude/skills/vibe/`, which has no way to tell a dead port from a wrong one.
+    if state_guard.process.as_mut().is_none_or(|process| !process.is_alive()) {
+        if state_guard.process.is_some() {
+            tracing::warn!("cached server process is no longer running; restarting it");
+        }
         let binary_path = resolve_server_binary(&app_handle)?;
         let ffmpeg_path = resolve_ffmpeg_path(&app_handle);
         let process =

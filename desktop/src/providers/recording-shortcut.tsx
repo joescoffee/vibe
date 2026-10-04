@@ -9,6 +9,7 @@ import { usePersisted } from '~/lib/config-store'
 import { getDefaultRecordingShortcut } from '~/lib/config'
 import type { MeetingRecordingOptions } from '~/lib/meeting-prompt'
 import { ensureSystemAudioPermission } from '~/lib/permissions'
+import { setNormalRecordingActive as markNormalRecording } from '~/lib/recording-session'
 import { m } from '~/paraglide/messages.js'
 import { useHotkeyProvider } from './hotkey'
 
@@ -76,6 +77,7 @@ export function RecordingShortcutProvider({ children }: { children: ReactNode })
 			await invoke('start_record', { devices: selectedDevices, recordingName: null })
 			recordingRef.current = true
 			normalRecordingActiveRef.current = true
+			markNormalRecording(true)
 			setIsShortcutRecording(true)
 			return true
 		} catch (error) {
@@ -112,6 +114,7 @@ export function RecordingShortcutProvider({ children }: { children: ReactNode })
 	useEffect(() => {
 		function resetRecording() {
 			normalRecordingActiveRef.current = false
+			markNormalRecording(false)
 			stoppingRef.current = false
 			if (!recordingRef.current) return
 			recordingRef.current = false
@@ -189,8 +192,11 @@ export function RecordingShortcutProvider({ children }: { children: ReactNode })
 		})
 	}, [])
 
+	// Also mirrored into the module flag: the Record button and the meeting prompt both go through
+	// this, and the dictation hotkey reads that flag to refuse an overlap it cannot disambiguate.
 	const setNormalRecordingActive = useCallback((active: boolean) => {
 		normalRecordingActiveRef.current = active
+		markNormalRecording(active)
 	}, [])
 
 	return (

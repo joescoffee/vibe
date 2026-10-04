@@ -13,7 +13,7 @@ import { autoProjectName } from '~/lib/project-name'
 import { notifyTranscriptsChanged, saveTranscript, TRANSCRIPT_VERSION, type TranscriptRecord } from '~/lib/transcripts-store'
 import type { NamedPath, ProjectSource } from '~/lib/types'
 import { useConfirmExit } from '~/lib/use-confirm-exit'
-import { hotkeyRecordingActive } from '~/providers/hotkey'
+import { isHotkeyRecordingActive } from '~/lib/recording-session'
 import { useRecordingShortcut } from '~/providers/recording-shortcut'
 import { ErrorModalContext } from '~/providers/error-modal'
 import { usePreferenceProvider, type Preference } from '~/providers/preference'
@@ -179,7 +179,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 	// transcript written here carries `segments: []`: the audio is saved, the transcript is not.
 	useEffect(() => {
 		const unlisten: Promise<UnlistenFn> = listen<{ path: string; name: string; warning?: string }>('record_finish', async ({ payload }) => {
-			if (hotkeyRecordingActive) return
+			if (isHotkeyRecordingActive()) return
 			recording.setIsRecording(false)
 			setPanel('none')
 			if (payload.warning) toast.warning(m.recordingRecoveredWarning(), { description: payload.warning, position: 'bottom-center' })
@@ -224,7 +224,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
 	useEffect(() => {
 		const unlisten: Promise<UnlistenFn> = listen<string | { message?: string }>('record_error', ({ payload }) => {
-			if (hotkeyRecordingActive) return
+			if (isHotkeyRecordingActive()) return
 			const message = typeof payload === 'string' ? payload : payload?.message || m.error()
 			recording.setIsRecording(false)
 			setPanel('none')
@@ -314,6 +314,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 		}
 
 		async function showWindow() {
+			// `setup.rs` already built the window hidden for an autostart launch. Showing it here
+			// anyway is what made "Start at login" open and focus the window every login.
+			if (await invoke<boolean>('is_background_launch')) return
 			const currentWindow = webviewWindow.getCurrentWebviewWindow()
 			await currentWindow.show()
 			if (import.meta.env.PROD) await currentWindow.setFocus()

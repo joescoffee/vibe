@@ -99,6 +99,7 @@ export const mediaMiscHandlers: CommandHandlerMap = {
 
 	get_argv: () => [] as string[],
 	is_online: () => true,
+	is_background_launch: () => false,
 	is_crashed_recently: () => false,
 	rename_crash_file: () => undefined,
 	// The browser has no app_config.json; the plugin mock already holds the settings.

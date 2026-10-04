@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { m } from '~/paraglide/messages.js'
 import * as config from '~/lib/config'
 import type { ModelIntegrity } from '~/lib/config'
-import { isModelFileUsable } from '~/lib/model'
+import { isModelFileUsable, type DownloadModelResult } from '~/lib/model'
 import { usePreferenceProvider } from '~/providers/preference'
 import { useToastProvider } from '~/providers/toast'
 
@@ -34,7 +34,16 @@ export function useModelGates() {
 			progressToast.setOpen(true)
 			progressToast.setProgress(0)
 			try {
-				await invoke('download_model', { url: options.url, path: modelPath, integrity: options.integrity })
+				// `download_model` answers a cancellation with `Ok(Cancelled)` rather than throwing,
+				// so "it did not throw" is not "the file is there". Reading the status is what the
+				// enum is for; two of its three callers used to ignore it, and on the setup screen
+				// cancelling the required VAD download selected a model whose VAD file is absent.
+				const result = await invoke<DownloadModelResult>('download_model', {
+					url: options.url,
+					path: modelPath,
+					integrity: options.integrity,
+				})
+				if (result.status !== 'completed') return false
 				toast.success(m.downloadComplete())
 				return true
 			} finally {

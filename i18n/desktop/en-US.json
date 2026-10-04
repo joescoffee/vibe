@@ -452,6 +452,8 @@
 	"agentInstructionsCopied": "Agent skill instructions copied to clipboard",
 	"localApiUnreachable": "Could not reach the local API",
 	"permissionAudioRecording": "Please enable system audio recording in System Settings, then try again.",
+	"permissionMicrophone": "Please allow Vibe to use the microphone in System Settings, then try again.",
+	"dictationInProgress": "Dictation is using the microphone. Stop it before recording.",
 	"rename": "Rename",
 	"modelName": "Model name",
 	"save": "Save",

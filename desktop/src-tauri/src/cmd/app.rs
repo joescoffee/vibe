@@ -156,6 +156,17 @@ pub fn crash_marker_path(app_handle: &tauri::AppHandle) -> PathBuf {
 
 pub const CRASH_MARKER: &str = "crash.txt";
 
+/// Whether this process was started by the autostart entry rather than by the user.
+///
+/// `setup.rs` builds the main window with `.visible(!background_launch)`, and then the webview's
+/// own mount effect called `show()` unconditionally about 300 ms later and undid it -- so every
+/// login opened the window and took focus, which is the one thing a hidden launch is for. The
+/// webview had no way to know: five references to the flag in the tree, all Rust. This is it.
+#[tauri::command]
+pub fn is_background_launch() -> bool {
+    crate::cli::is_background_launch()
+}
+
 #[tauri::command]
 pub fn is_crashed_recently(app_handle: tauri::AppHandle) -> bool {
     let path = crash_marker_path(&app_handle);

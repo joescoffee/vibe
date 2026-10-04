@@ -1,5 +1,6 @@
 import { ReactNode, createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { toast } from 'sonner'
 import { notify } from '~/lib/notify'
 import { emit, listen } from '@tauri-apps/api/event'
 import { register, unregister, isRegistered } from '@tauri-apps/plugin-global-shortcut'
@@ -11,6 +12,8 @@ import { gpuOutOfMemoryBefore } from '~/lib/gpu-memory'
 import { usePersisted } from '~/lib/config-store'
 import { createClient, fillPrompt } from '~/lib/ai'
 import { withoutUnsupportedOptions } from '~/lib/model'
+import { ensureMicrophonePermission } from '~/lib/permissions'
+import { isNormalRecordingActive, setHotkeyRecordingActive } from '~/lib/recording-session'
 import { isUserError } from '~/lib/server-errors'
 import * as transcript from '~/lib/transcript'
 import { usePreferenceProvider } from '~/providers/preference'
@@ -20,7 +23,6 @@ import * as config from '~/lib/config'
 
 // Module-level flag used by home viewModel to skip processing
 // when hotkey-triggered recording finishes
-export let hotkeyRecordingActive = false
 
 // Lives in lib/config so modules without a React dependency (the agent skill) can read the default.
 export const getDefaultHotkeyShortcut = config.getDefaultHotkeyShortcut
@@ -86,6 +88,17 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 	const isHotkeyRecordingRef = useRef(false)
 	const isStartingRef = useRef(false)
 	const isStoppingRef = useRef(false)
+	/**
+	 * Set when the key comes up during the start sequence. `handleHotkeyDown` awaits
+	 * `get_audio_devices`, which is tens of milliseconds, and `handleHotkeyUp` returned early for
+	 * that whole window because `isHotkeyRecordingRef` was not true yet. A fast push-to-talk tap
+	 * therefore started a recording with nobody left to stop it: the microphone stayed open until
+	 * the next press. The start guard already covered `isStartingRef`; the stop guard did not, and
+	 * that asymmetry is the bug.
+	 */
+	const releasedWhileStartingRef = useRef(false)
+	/** `handleHotkeyUp` is declared below `handleHotkeyDown`, which has to replay a release. */
+	const handleHotkeyUpRef = useRef<() => Promise<void>>(async () => {})
 	const shortcutPressedRef = useRef(false)
 	const hotkeyOutputModeRef = useRef(hotkeyOutputMode)
 	const hotkeyNormalizeOutputRef = useRef(hotkeyNormalizeOutput)
@@ -124,8 +137,19 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 
 	const handleHotkeyDown = useCallback(async () => {
 		if (isHotkeyRecordingRef.current || isStartingRef.current || isStoppingRef.current) return
+		// The missing half of the mutual exclusion. `recording-shortcut.tsx` already refuses to
+		// start over a dictation; nothing refused a dictation over a recording, and since
+		// `record_finish` carries no session identity both listeners decide whose event it is from
+		// these flags -- so the overlap sent a meeting recording into the dictation pipeline, to be
+		// typed into whatever had focus, while `session.tsx` dropped it.
+		if (isNormalRecordingActive()) {
+			toast.error(m.recordingAlreadyInProgress())
+			return
+		}
 		isStartingRef.current = true
+		releasedWhileStartingRef.current = false
 		try {
+			if (!(await ensureMicrophonePermission())) return
 			const devices = await invoke<AudioDevice[]>('get_audio_devices')
 			const defaultInput = devices.find((d) => d.isDefault && d.isInput)
 			if (!defaultInput) {
@@ -134,7 +158,7 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 			}
 
 			isHotkeyRecordingRef.current = true
-			hotkeyRecordingActive = true
+			setHotkeyRecordingActive(true)
 			setIsHotkeyRecording(true)
 
 			await invoke('start_record', {
@@ -146,14 +170,24 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 		} catch (error) {
 			console.error('Hotkey start_record error:', error)
 			isHotkeyRecordingRef.current = false
-			hotkeyRecordingActive = false
+			setHotkeyRecordingActive(false)
 			setIsHotkeyRecording(false)
 		} finally {
 			isStartingRef.current = false
 		}
+		// The release that arrived mid-start. Replayed now that the recording really exists, so a
+		// tap shorter than the device enumeration still stops.
+		if (releasedWhileStartingRef.current) {
+			releasedWhileStartingRef.current = false
+			if (isHotkeyRecordingRef.current) await handleHotkeyUpRef.current()
+		}
 	}, [showIndicator])
 
 	const handleHotkeyUp = useCallback(async () => {
+		if (isStartingRef.current) {
+			releasedWhileStartingRef.current = true
+			return
+		}
 		if (!isHotkeyRecordingRef.current || isStoppingRef.current) return
 		isStoppingRef.current = true
 		try {
@@ -163,6 +197,10 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 			throw error
 		}
 	}, [])
+
+	useEffect(() => {
+		handleHotkeyUpRef.current = handleHotkeyUp
+	}, [handleHotkeyUp])
 
 	// Listen for record_finish and process when hotkey-triggered
 	useEffect(() => {
@@ -239,7 +277,7 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 			} finally {
 				isStoppingRef.current = false
 				isHotkeyRecordingRef.current = false
-				hotkeyRecordingActive = false
+				setHotkeyRecordingActive(false)
 				setIsHotkeyRecording(false)
 			}
 		})
@@ -261,7 +299,7 @@ export function HotkeyProvider({ children }: { children: ReactNode }) {
 				isStartingRef.current = false
 				isStoppingRef.current = false
 				isHotkeyRecordingRef.current = false
-				hotkeyRecordingActive = false
+				setHotkeyRecordingActive(false)
 				setIsHotkeyRecording(false)
 			})
 		})

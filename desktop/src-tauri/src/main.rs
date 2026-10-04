@@ -149,6 +149,7 @@ async fn main() -> Result<()> {
             cmd::ytdlp::download_audio,
             cmd::ytdlp::get_temp_path,
             cmd::ytdlp::get_latest_ytdlp_version,
+            cmd::app::is_background_launch,
             cmd::app::is_crashed_recently,
             cmd::app::rename_crash_file,
             cmd::app::type_text,
