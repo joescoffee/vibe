@@ -243,6 +243,30 @@ failure.
 | `tauri build` 的 DMG 階段失敗，錯誤是「裝置已經沒有空間」，但磁碟還有幾百 GB | `create-dmg` 把暫存的 `rw.<pid>.<name>.dmg` 寫在**來源資料夾內**，並用 `du -s` 於該資料夾估算映像大小。失敗時那個暫存檔會留下，下一次就得把它也塞進映像——每失敗一次，來源就多 91 MB，直到映像裝不下。成功的執行會自己清掉，所以殘留必然代表上一次失敗 | 建置前 `rm -f desktop/src-tauri/target/release/bundle/macos/rw.*.dmg`（或你的 `CARGO_TARGET_DIR` 下對應路徑）。注意 `tauri build` 在這一步失敗時整體仍可能回報 exit 0，所以要 `ls` dmg 目錄確認產物 |
 | 想重現昨天的 bug，log 卻是空的 | `cleaner.rs` 的清理在 `setup.rs:44`，早於 `:123` 的 CLI 分支——連不開視窗的 `vibe transcribe` 也會刪掉非今日的 log | 任何執行 bundle 的動作之前，先把整個 log 目錄複製到別處（`verify-vibe` 的 gate 0 就是做這件事） |
 
+## PDF export carries two fonts, and still refuses two things
+
+`desktop/src/assets/fonts/` holds Rubik (118 KB) and Noto Sans TC (11 MB). Neither is a superset.
+Measured from the two cmaps as a percentage of each Unicode block:
+
+|  | Latin | Hebrew | Cyrillic | CJK | Kana | Hangul |
+|---|---|---|---|---|---|---|
+| Rubik | 100% | 41% | 0% | 0% | 0% | 0% |
+| Noto Sans TC | 100% | 0% | 25% | 73% | 98% | 0% |
+
+react-pdf has no per-character fallback, so `pdfFontFor()` picks one family per export from the
+text. What it still refuses is exactly what no bundled font can draw: **Hangul**, and **Hebrew
+mixed with CJK in one file**. Those two refusals are narrow and measured; the one they replace
+rejected all Han and Kana as well, which was right while Rubik was alone.
+
+The 11 MB is source, not output. react-pdf subsets: a two-line Chinese transcript renders a 68 KB
+PDF with `CZZZZZ+NotoSansTC-Bold` embedded and subsetted. The fonts load on the first export, not
+at startup.
+
+`cjk-proof.test.tsx` renders a real PDF and reads it back with `pdftotext`, character by
+character. Pointing the CJK family at Rubik reproduces the original bug verbatim —
+`賽局理論與 AI` becomes `ý@Ö AI` — and turns the test red. A third case asserts Rubik *cannot*
+draw it, so the other two cannot pass by reading their own input.
+
 ## The regular improvement loop
 
 `scripts/improve/` is a PDCA cycle over this repo. `chore improve` names the next backlog item and

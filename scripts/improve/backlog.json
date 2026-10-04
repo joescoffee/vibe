@@ -26,26 +26,6 @@
       "blocked_by": "interacts with the non-speech trim and the ScratchFile guard in cmd/transcribe.rs; needs a design pass before code"
     },
     {
-      "id": "pdf-cjk-font",
-      "title": "PDF export refuses CJK instead of rendering it",
-      "found": "deep review 2026-10-04, defect 2; refusal shipped in 8585ebd9",
-      "detail": "Rubik has no Han, Kana or Hangul. The export now throws with a message naming DOCX/HTML/TXT/SRT/VTT rather than writing mojibake. Bundling a CJK face would make it work; it costs several MB in the bundle. The user transcribes Chinese.",
-      "class": "feature",
-      "routes_to": "feature.md",
-      "needs_human": true,
-      "human_decides": "whether a multi-megabyte font belongs in the bundle"
-    },
-    {
-      "id": "dead-modules",
-      "title": "20 modules unreachable from main.tsx",
-      "found": "module-graph.test.ts baseline, 2026-10-05",
-      "detail": "15 are components/ui shadcn primitives kept deliberately; 5 are leftovers from the old home page. The ratchet stops new ones appearing. Deleting any of these is a one-line edit to KNOWN_UNREACHABLE plus the file.",
-      "class": "cleanup",
-      "routes_to": "refactoring.md",
-      "needs_human": true,
-      "human_decides": "which of the five home-page leftovers to delete; the ui primitives should stay"
-    },
-    {
       "id": "transcript-quality-fixtures",
       "title": "The degenerate-repetition measure cannot gate anything in CI",
       "found": "chorefile comment on task transcript-quality",
@@ -82,16 +62,6 @@
       "routes_to": "shipping.md",
       "needs_human": true,
       "human_decides": "when to cut a server release carrying both patches"
-    },
-    {
-      "id": "tcc-probe-artifact",
-      "title": "A test project of mine is sitting in the user's transcripts folder",
-      "found": "2026-10-02",
-      "detail": "~/Documents/Vibe/File-tcc-probe-20261002-085742 is mine. Everything else in that folder is the user's real work and is off limits.",
-      "class": "cleanup",
-      "routes_to": "pause-safely.md",
-      "needs_human": true,
-      "human_decides": "permission to delete it"
     }
   ]
 }

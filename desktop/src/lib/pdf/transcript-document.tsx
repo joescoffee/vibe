@@ -2,8 +2,23 @@ import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import type { Segment } from '~/lib/transcript'
 import { includesSummary, includesTranscript, segmentMetadata, type TranscriptExportOptions } from '~/lib/transcript-export'
 
-/** Registered by `registerPdfFonts` in the app, and from disk in the layout tests. */
+/**
+ * Two families, because no one bundled font draws everything this app has to export.
+ *
+ * Measured from the two cmaps on 2026-10-05, as a percentage of each Unicode block:
+ *
+ *            Latin  Hebrew  Cyrillic  CJK  Kana  Hangul
+ *   Rubik     100%     41%        0%    0%    0%      0%
+ *   NotoTC    100%      0%       25%   73%   98%      0%
+ *
+ * So neither is a superset, and the document picks one per export. The comment this replaces
+ * said Rubik carries "Latin, Hebrew and Cyrillic"; its Cyrillic coverage is zero.
+ */
 export const PDF_FONT = 'Rubik'
+export const PDF_FONT_CJK = 'Noto Sans TC'
+
+/** Registered by `registerPdfFonts` in the app, and from disk in the layout tests. */
+export type PdfFontFamily = typeof PDF_FONT | typeof PDF_FONT_CJK
 
 /** The same palettes the HTML export uses, so the file matches the preview beside it. */
 const PALETTES = {
@@ -13,10 +28,10 @@ const PALETTES = {
 
 type Palette = (typeof PALETTES)[keyof typeof PALETTES]
 
-function sheet(palette: Palette, direction: 'rtl' | 'ltr') {
+function sheet(palette: Palette, direction: 'rtl' | 'ltr', family: PdfFontFamily) {
 	const align = direction === 'rtl' ? ('right' as const) : ('left' as const)
 	return StyleSheet.create({
-		page: { paddingVertical: 52, paddingHorizontal: 52, backgroundColor: palette.background, fontFamily: PDF_FONT },
+		page: { paddingVertical: 52, paddingHorizontal: 52, backgroundColor: palette.background, fontFamily: family },
 		title: { fontSize: 20, fontWeight: 700, color: palette.accent, textAlign: 'center', marginBottom: 10 },
 		heading: { fontSize: 13, fontWeight: 700, color: palette.ink, textAlign: align, direction, marginTop: 18, marginBottom: 2 },
 		block: { marginTop: 12 },
@@ -42,6 +57,8 @@ export interface TranscriptDocumentProps {
 	summary: string
 	options: TranscriptExportOptions
 	labels: { transcript: string; summary: string }
+	/** Which bundled family to draw with. `transcriptToPdf` picks it from the text. */
+	family?: PdfFontFamily
 }
 
 /**
@@ -51,9 +68,9 @@ export interface TranscriptDocumentProps {
  * algorithm, breaks lines in logical order and reorders each finished line — which is why the
  * Hebrew reads right to left while the English words, numbers and brackets inside it do not flip.
  */
-export function TranscriptDocument({ segments, summary, options, labels }: TranscriptDocumentProps) {
+export function TranscriptDocument({ segments, summary, options, labels, family = PDF_FONT }: TranscriptDocumentProps) {
 	const palette = PALETTES[options.theme === 'dark' ? 'dark' : 'light']
-	const styles = sheet(palette, options.direction)
+	const styles = sheet(palette, options.direction, family)
 	const title = options.title.trim()
 	const both = options.content === 'both'
 	const showTranscript = includesTranscript(options.content)
