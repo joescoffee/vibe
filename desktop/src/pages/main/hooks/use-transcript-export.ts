@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import { dirname, downloadDir, join } from '@tauri-apps/api/path'
 import * as clipboard from '@tauri-apps/plugin-clipboard-manager'
 import * as dialog from '@tauri-apps/plugin-dialog'
@@ -100,7 +101,31 @@ export function useTranscriptExport({
 			defaultPath,
 		})
 		if (!target) return false
+		// The guard above narrows `file`, but that narrowing does not reach a nested function.
+		const source = file
 
+		try {
+			await writeExport(target)
+		} catch (error) {
+			// Nothing on this chain used to catch, and there is no `unhandledrejection` handler in
+			// the app, so a full disk or a refused path produced no toast at all -- the user saw
+			// neither success nor failure. That matters most precisely when it fails: the
+			// save-failure modal tells the user to export before closing, and an export that
+			// silently does nothing loses the transcript it was meant to rescue.
+			const detail = error instanceof Error ? error.message : String(error)
+			void invoke('log_frontend_error', { scope: 'export', message: `${format}: ${detail}` }).catch(() => undefined)
+			toast.error(m.error(), { description: detail, position: 'bottom-center' })
+			return false
+		}
+
+		toast.success(m.saveSuccess(), {
+			description: suggestedName,
+			position: 'bottom-center',
+			action: { label: m.showInFolder(), onClick: () => openPath({ name: '', path: target }) },
+		})
+		return true
+
+		async function writeExport(target: string) {
 		if (format === 'pdf') {
 			const bytes = await transcriptToPdf(segments, summary ?? '', serializerOptions, {
 				transcript: m.exportTranscript(),
@@ -108,7 +133,7 @@ export function useTranscriptExport({
 			})
 			await fs.writeFile(target, bytes)
 		} else if (format === 'docx') {
-			const document = await toDocx(file.name, segments, serializerOptions.direction, speakerLabel, {
+			const document = await toDocx(source.name, segments, serializerOptions.direction, speakerLabel, {
 				content,
 				showTimestamps,
 				showSpeakers,
@@ -123,12 +148,7 @@ export function useTranscriptExport({
 			await fs.writeTextFile(target, preview)
 		}
 
-		toast.success(m.saveSuccess(), {
-			description: suggestedName,
-			position: 'bottom-center',
-			action: { label: m.showInFolder(), onClick: () => openPath({ name: '', path: target }) },
-		})
-		return true
+		}
 	}, [
 		content,
 		file,
