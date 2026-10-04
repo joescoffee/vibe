@@ -16,7 +16,9 @@ incomplete while the map lists others.
 - `transcription.projectsPath` must point at the run's `projects/` directory. The user's
   `~/Documents/Vibe` holds real work and is off limits.
 - Pin `general.displayLanguage`, then re-pin `transcription.modelOptions.lang`, then clear
-  `transcription.modelOptions.init_prompt`. Read all three back from the file before driving.
+  `transcription.modelOptions.init_prompt`. Read all three back from the file before driving —
+  out of the `transcription.modelOptions` object, which is where they live. `app_config.json` is
+  flat and those last two are paths into one key's value, not keys.
 - Prefer `--class-contains`; accessible names are i18n messages and shift with translation progress.
 - Restore `app_config.json` and `.window-state.json` in cleanup. Never delete the run directory.
 

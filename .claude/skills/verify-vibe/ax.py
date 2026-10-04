@@ -29,6 +29,51 @@ def osascript(script: str, args: list[str], run: Path | None, step: str, timeout
         tmp.unlink(missing_ok=True)
 
 
+NO_WEB_AREA = "BLOCKED no AXWebArea"
+NO_ELEMENT = "BLOCKED no element"
+RETRY_ATTEMPTS = 5
+
+_ACTIVATE = """
+on run argv
+	set pid to (item 1 of argv) as integer
+	tell application "System Events" to set frontmost of (first process whose unix id is pid) to true
+	delay 0.3
+	return "OK"
+end run
+"""
+
+
+def activate(pid: int, run: Path | None, step: str) -> None:
+    """Bring the app forward before walking its accessibility tree.
+
+    Measured on 2026-10-04, with a denominator: twenty cold attempts to resolve the AXWebArea
+    returned FOUND 4 and MISSING 16; a later ten returned MISSING 10; warming the process first
+    did not help, 10 of 10 MISSING. After activating the app once, thirty consecutive attempts
+    returned FOUND 30 of 30, regardless of which app held focus afterwards. The root cause was
+    not isolated and none is claimed here. What is claimed is the measurement.
+    """
+    osascript(_ACTIVATE, [str(pid)], run, f"{step}-activate", timeout=20.0)
+
+
+def ax_run(script: str, args: list[str], run: Path | None, step: str, attempts: int = RETRY_ATTEMPTS) -> dict:
+    """Run an AX script, re-trying only the one failure that is the instrument's.
+
+    `webArea()` is intermittent, so a single miss says nothing about the app. Retrying inside one
+    script returned FOUND 7 of 10 where a single cold attempt returned 4 of 20. Only
+    `BLOCKED no AXWebArea` is retried: `BLOCKED no element` is an answer about the app and
+    retrying it would turn a real absence into a timeout.
+    """
+    pid = args[0]
+    result = {}
+    for attempt in range(attempts):
+        if attempt:
+            activate(int(pid), run, f"{step}-retry{attempt}")
+        result = osascript(script, args, run, step if not attempt else f"{step}-retry{attempt}")
+        if result["rc"] != 0 or result["stdout"].strip() != NO_WEB_AREA:
+            return result
+    return result
+
+
 
 # `entire contents` returns 0 elements for this process, so every walk is manual.
 _AX_PRELUDE = """
@@ -176,15 +221,39 @@ on run argv
 		end repeat
 		set panel to first window of p whose name is not "%WINDOW%"
 
-		keystroke "g" using {command down, shift down}
-
-		-- Guard 2: the Go-to-Folder sheet must exist before the path is typed.
+		-- Guard 1b: existing is not the same as being key, and the old code fired
+		-- Cmd-Shift-G immediately after guard 1 passed, with no settle and no retry. The
+		-- loop above can exit on its first iteration, against a panel that is on screen but
+		-- not yet taking keystrokes -- so the shortcut went nowhere and guard 2 timed out
+		-- against a panel that was perfectly healthy. Driven by hand with a half-second
+		-- delay against a settled panel, the sheet appeared every time.
 		set waited to 0
-		repeat until (exists sheet 1 of panel)
+		repeat until (value of attribute "AXMain" of panel is true)
 			delay 0.1
 			set waited to waited + 0.1
-			if waited > 8 then return "BLOCKED go-to-folder sheet never appeared"
+			if waited > 8 then return "BLOCKED open panel never became the main window"
 		end repeat
+		delay 0.5
+
+		-- Guard 2: the Go-to-Folder sheet must exist before the path is typed. Retried,
+		-- because a dropped shortcut is the most common failure here and a second attempt
+		-- costs a second where a BLOCKED costs the whole run.
+		set sheetReady to false
+		repeat with attempt from 1 to 5
+			keystroke "g" using {command down, shift down}
+			set waited to 0
+			repeat until (exists sheet 1 of panel)
+				delay 0.1
+				set waited to waited + 0.1
+				if waited > 2 then exit repeat
+			end repeat
+			if (exists sheet 1 of panel) then
+				set sheetReady to true
+				exit repeat
+			end if
+			delay 0.4
+		end repeat
+		if not sheetReady then return "BLOCKED go-to-folder sheet never appeared"
 
 		keystroke posixPath
 		delay 0.3
@@ -232,6 +301,7 @@ end run
 def cmd_dump(args) -> None:
     run = Path(args.run).resolve()
     pid = pid_of(run)
+    activate(pid, run, f"dump-{args.step}")
     result = osascript(_DUMP, [str(pid)], run, f"dump-{args.step}", timeout=180)
     body = result["stdout"]
     if result["rc"] != 0 or body.startswith("BLOCKED"):
@@ -249,13 +319,24 @@ def cmd_press(args) -> None:
     require_gate2(run, "press")
     pid = pid_of(run)
     mode, needle = _selector(args)
-    result = osascript(_PRESS, [str(pid), mode, needle], run, f"press-{mode}")
+    result = ax_run(_PRESS, [str(pid), mode, needle], run, f"press-{mode}")
     body = result["stdout"].strip()
     if result["rc"] != 0:
         emit("BLOCKED", "press", rc=result["rc"], detail=result["stderr"].strip()[:200])
-    if body.startswith("BLOCKED"):
-        # Distinguish "the button is gone" from "the harness lost the web area".
-        control = osascript(_EXISTS, [str(pid), "title", CONTROL_ELEMENT], run, "press-control")
+    # `BLOCKED no AXWebArea` and `BLOCKED no element` are different answers and used to be
+    # read as one. The first is the instrument -- `webArea()` is intermittent -- and the rule
+    # this skill states for itself is that an instrument failure is BLOCKED, never FAIL. It
+    # reported FAIL "the element is genuinely absent" for a button a dump three minutes
+    # earlier had shown present, because the control probe shares the same flaky lookup and
+    # happened to succeed on its own attempt. `shell/192616533474-press-class.json` has it.
+    if body == NO_WEB_AREA:
+        emit("BLOCKED", "press", rc=0,
+             detail=f"the AXWebArea did not resolve after {RETRY_ATTEMPTS} attempts with the app "
+                    "activated; this says nothing about whether the element exists")
+    if body == NO_ELEMENT:
+        # Only now is the question about the app. The control element says whether the tree we
+        # searched was the right one.
+        control = ax_run(_EXISTS, [str(pid), "title", CONTROL_ELEMENT], run, "press-control")
         if control["stdout"].strip().startswith("PRESENT"):
             emit("FAIL", "press", rc=0,
                  detail=f"{mode}={needle!r} not found, but control element resolves — "
@@ -263,6 +344,9 @@ def cmd_press(args) -> None:
         emit("BLOCKED", "press", rc=0,
              detail=f"{mode}={needle!r} not found AND control element {CONTROL_ELEMENT!r} "
                     "also unresolvable — the instrument is broken, not the app")
+    if body.startswith("BLOCKED"):
+        # A BLOCKED string this code does not know is still not a FAIL.
+        emit("BLOCKED", "press", rc=0, detail=f"unrecognised AX result: {body!r}")
     emit("PASS", "press", rc=0, detail=f"{mode}={needle!r} → {body}")
 
 
@@ -270,12 +354,12 @@ def cmd_exists(args) -> None:
     run = Path(args.run).resolve()
     pid = pid_of(run)
     mode, needle = _selector(args)
-    result = osascript(_EXISTS, [str(pid), mode, needle], run, f"exists-{mode}")
+    result = ax_run(_EXISTS, [str(pid), mode, needle], run, f"exists-{mode}")
     body = result["stdout"].strip()
     if result["rc"] != 0 or body.startswith("BLOCKED"):
         emit("BLOCKED", "exists", rc=result["rc"], detail=body or result["stderr"].strip()[:200])
     if body == "ABSENT":
-        control = osascript(_EXISTS, [str(pid), "title", CONTROL_ELEMENT], run, "exists-control")
+        control = ax_run(_EXISTS, [str(pid), "title", CONTROL_ELEMENT], run, "exists-control")
         if not control["stdout"].strip().startswith("PRESENT"):
             emit("BLOCKED", "exists", rc=0,
                  detail=f"{needle!r} absent and control element also absent — instrument broken")

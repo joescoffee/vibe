@@ -9,6 +9,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -167,6 +168,52 @@ def read_config() -> dict:
     if not path.is_file():
         raise Blocked(f"{path} does not exist")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# The repo this skill ships inside; `config-keys.ts` is the only list of what the app really reads.
+REPO = Path(__file__).resolve().parents[3]
+CONFIG_KEYS_TS = REPO / "desktop" / "src" / "lib" / "config-keys.ts"
+
+
+def known_config_keys() -> set[str]:
+    """Every key the app persists, read from `config-keys.ts` rather than restated here.
+
+    `app_config.json` is flat: its keys *contain* dots, they are not paths. So writing
+    `transcription.modelOptions.lang` as a top-level key creates a sibling of
+    `transcription.modelOptions` that nothing reads -- and a readback of the same flat key
+    confirms it, which is how this skill spent a whole run with the real `init_prompt` still in
+    place while reporting that it had been cleared.
+    """
+    if not CONFIG_KEYS_TS.is_file():
+        raise Blocked(f"{CONFIG_KEYS_TS} not found -- cannot tell a real config key from a typo")
+    keys = set(re.findall(r""":\s*'([a-zA-Z0-9_.]+)'""", CONFIG_KEYS_TS.read_text(encoding="utf-8")))
+    if len(keys) < 20:
+        # A regex that stops matching would make every key look unknown, or every key look fine
+        # depending on which way it failed. Refuse instead of guessing.
+        raise Blocked(f"only {len(keys)} keys parsed out of {CONFIG_KEYS_TS}; the parser is wrong")
+    return keys
+
+
+def resolve_config_path(key: str) -> tuple[str, list[str]]:
+    """Split `key` into the flat key the app reads and the path inside its value.
+
+    `transcription.projectsPath` -> `('transcription.projectsPath', [])`
+    `transcription.modelOptions.lang` -> `('transcription.modelOptions', ['lang'])`
+
+    Raises `Blocked` for anything that is neither, rather than writing a key nothing reads.
+    """
+    keys = known_config_keys()
+    if key in keys:
+        return key, []
+    parts = key.split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        head = ".".join(parts[:cut])
+        if head in keys:
+            return head, parts[cut:]
+    raise Blocked(
+        f"{key!r} is not a key the app reads, and no prefix of it is either. "
+        f"See {CONFIG_KEYS_TS.relative_to(REPO)}."
+    )
 
 
 def pid_of(run: Path) -> int:

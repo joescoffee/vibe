@@ -227,14 +227,23 @@ segments, `persist()` returns early at `use-transcribe-queue.ts:349`
 (`segments.length === 0`), and **`saveTranscript` is never called** — the run goes green having
 exercised nothing, which is the exact failure this skill exists to prevent.
 
-Two config landmines before the first run, both live in the shipped `app_config.json`:
+Three config landmines before the first run, all live in the shipped `app_config.json`:
 
+- **`app_config.json` is flat.** Its keys *contain* dots; they are not paths.
+  `transcription.modelOptions` is one key whose value is an object, so
+  `transcription.modelOptions.lang` is a path into that object and not a key of its own. Writing it
+  as a top-level key creates a sibling nothing reads — and a readback of the same flat key confirms
+  it, which is how a whole run once transcribed with the real `init_prompt` still in place while
+  reporting it cleared. `config-set` resolves this against `desktop/src/lib/config-keys.ts` and
+  refuses any key the app does not read, so you can pass either form.
 - `transcription.modelOptions.init_prompt` is a long Traditional Chinese BCM glossary and will skew
   an English fixture. Clear it for the run and restore it after.
 - Writing `general.displayLanguage` **also rewrites the transcription language**:
   `preference.tsx:371-376` runs `setModelOptions({… lang: displayLanguage.split('-')[0]})` on every
   locale change. Pin the display language first, then re-pin `transcription.modelOptions.lang`, then
   read both back from the file before driving.
+
+Read the three back out of the nested object, not out of the key you passed.
 
 ## Evidence
 

@@ -36,7 +36,7 @@ from ax import (  # noqa: E402
 from evidence import (  # noqa: E402
     APP_BINARY, APP_PGREP, CONFIG_DIR, OVERRIDABLE_CHECKS, Blocked, Failed, alive,
     cmd_frontend_errors, cmd_fs_snapshot, emit, launch_start, log_entries, newest_log,
-    pid_of, read_config, run_shell, write_gate2,
+    pid_of, read_config, resolve_config_path, run_shell, write_gate2,
 )
 
 READINESS_MARKERS = {
@@ -101,16 +101,48 @@ def cmd_config_set(args) -> None:
     which matters because every relaunch destroys a day of logs."""
     run = Path(args.run).resolve()
     path = CONFIG_DIR / "app_config.json"
+    value = json.loads(args.json)
+
+    # `app_config.json` is flat: its keys contain dots, they are not paths. Writing
+    # `transcription.modelOptions.lang` as a top-level key used to create a sibling of
+    # `transcription.modelOptions` that nothing reads, and reading back the same flat key
+    # confirmed it -- so a whole run transcribed with the real `init_prompt` still in place
+    # while this command reported it cleared. `resolve_config_path` refuses a key the app
+    # does not read rather than inventing one.
+    flat_key, inner = resolve_config_path(args.key)
+
     config = read_config()
-    config[args.key] = json.loads(args.json)
+    if inner:
+        container = config.get(flat_key)
+        if not isinstance(container, dict):
+            emit("BLOCKED", f"config.{args.key}", rc=2,
+                 detail=f"{flat_key!r} is {type(container).__name__}, not an object; cannot set {'.'.join(inner)}",
+                 source=str(path))
+        cursor = container
+        for part in inner[:-1]:
+            nxt = cursor.get(part)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cursor[part] = nxt
+            cursor = nxt
+        cursor[inner[-1]] = value
+    else:
+        config[flat_key] = value
     path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     time.sleep(1.0)  # let config_watcher pick it up
-    readback = read_config().get(args.key)
-    if readback != config[args.key]:
+    # Read back through the same resolution, from a fresh load of the file. Reading back the
+    # key we just wrote in the shape we just wrote it is what made the old version unfalsifiable.
+    observed = read_config().get(flat_key)
+    for part in inner:
+        observed = observed.get(part) if isinstance(observed, dict) else None
+    if observed != value:
         emit("FAIL", f"config.{args.key}", rc=0,
-             detail=f"expected {config[args.key]!r}, observed {readback!r}", source=str(path))
-    emit("PASS", f"config.{args.key}", rc=0, detail=f"{args.key}={readback!r}", source=str(path))
+             detail=f"expected {value!r}, observed {observed!r} at {flat_key!r}{'.' + '.'.join(inner) if inner else ''}",
+             source=str(path))
+    emit("PASS", f"config.{args.key}", rc=0,
+         detail=f"{args.key}={observed!r} (written to {flat_key!r}{' path ' + '.'.join(inner) if inner else ''})",
+         source=str(path))
 
 
 def cmd_launch(args) -> None:
