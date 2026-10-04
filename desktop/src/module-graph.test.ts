@@ -68,7 +68,14 @@ function allSources(dir: string): string[] {
 	return out
 }
 
-/** Unreachable today. Shrinking this is a deletion; growing it needs a reason. */
+/**
+ * Unreachable today. Shrinking this is a deletion; growing it needs a reason.
+ *
+ * The five `pages/home/` entries that used to be here were deleted on 2026-10-05: leftovers from
+ * a home page `app.tsx` stopped routing to. What remains is fifteen `components/ui` primitives,
+ * which stay -- a component library is meant to be complete, and an unused primitive is not the
+ * same thing as dead application code.
+ */
 const KNOWN_UNREACHABLE = [
 	'components/advanced-options-button.tsx',
 	'components/advanced-transcribe.tsx',
@@ -85,11 +92,6 @@ const KNOWN_UNREACHABLE = [
 	'components/ui/scroll-area.tsx',
 	'components/ui/separator.tsx',
 	'components/ui/tabs.tsx',
-	'pages/home/audio-input.tsx',
-	'pages/home/audio-player.tsx',
-	'pages/home/audio-visualizer.tsx',
-	'pages/home/hooks/use-media-selection.ts',
-	'pages/home/progress-panel.tsx',
 ]
 
 describe('module graph', () => {
