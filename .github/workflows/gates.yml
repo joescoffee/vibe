@@ -83,7 +83,12 @@ jobs:
             - name: fetch ggml libs
               run: chore fetch-libs
 
+            # The runner can write under the checkout, so the default target dir is fine here.
+            # Named anyway, so CI, the nightly job and a human all point cargo at one place and a
+            # cache miss cannot be mistaken for a code change.
             - name: all gates
+              env:
+                  VIBE_IMPROVE_TARGET_DIR: ${{ github.workspace }}/target/improve
               run: uv run scripts/improve/evaluate.py --json gates.json
 
             # Uploaded whether or not the step above passed: a REJECT is the run worth reading.

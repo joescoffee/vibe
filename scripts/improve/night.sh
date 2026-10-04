@@ -11,6 +11,10 @@
 set -uo pipefail
 
 ROOT="${VIBE_IMPROVE_ROOT:-/Users/joeliu/Downloads/vibe}"
+# Point cargo outside the project tree. Under launchd the default would work, but this script is
+# also run by hand, and from a sandboxed shell a build script writing under `target/` gets EPERM
+# -- which `evaluate.py` correctly calls BLOCKED, and a night of BLOCKED is a wasted night.
+export VIBE_IMPROVE_TARGET_DIR="${VIBE_IMPROVE_TARGET_DIR:-${TMPDIR:-/tmp}/vibe-improve-target}"
 CLAUDE="${VIBE_IMPROVE_CLAUDE:-$HOME/.local/bin/claude}"
 DEADLINE_HOUR="${VIBE_IMPROVE_DEADLINE:-5}"
 LOG_DIR="$HOME/Library/Logs/VibeImprove"

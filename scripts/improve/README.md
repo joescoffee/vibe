@@ -115,3 +115,18 @@ version is already in `CLAUDE.md` and prose has failed to prevent this class of 
 Append to `items` with: `id`, `title`, `found` (who or what found it — a review, a commit, a
 person), `detail`, `class`, `routes_to`, and `needs_human`. Run `uv run scripts/improve/route.py
 --check` to confirm the route resolves. `blocked_by` holds an item back without removing it.
+
+## One environment variable decides whether cargo can run at all
+
+`VIBE_IMPROVE_TARGET_DIR` points cargo's target directory somewhere writable. Unset, cargo uses
+its own default, which is right on a CI runner, at a human's terminal and under launchd — and
+wrong in a sandboxed agent session, where a build script writing under the project tree gets
+`Operation not permitted (os error 1)`.
+
+`evaluate.py` reports that as **BLOCKED, not FAIL**, with the fix in the message. That distinction
+is the whole reason the variable is documented here: without it the first unattended night would
+have reported every Rust gate as a code failure and reverted work that was fine.
+
+Probing for the condition from Python does not work — ordinary writes into `target/` succeed in
+that sandbox while the build script's do not — so this is an explicit override rather than a
+guess.

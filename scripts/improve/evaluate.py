@@ -42,9 +42,35 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Where cargo writes. Build scripts cannot write into the project tree under a sandbox (EPERM,
-# os error 1), which is a tooling failure and must not read as a code failure.
-TARGET_ROOT = Path(os.environ.get("VIBE_IMPROVE_TARGET_DIR", ROOT / "target" / "improve"))
+# Where cargo writes, when anything says so. Unset by default: cargo's own target directory is
+# right for CI, for a human at a terminal and under launchd. The one place it is wrong is a
+# sandboxed agent session, where a build script writing under the project tree gets
+# `Operation not permitted (os error 1)` -- and probing for that from Python does not work,
+# because ordinary writes into `target/` succeed there while the build script's do not. So this
+# is an explicit override rather than a guess, and the gate below turns that EPERM into BLOCKED
+# with the variable's name in the message.
+TARGET_OVERRIDE = os.environ.get("VIBE_IMPROVE_TARGET_DIR")
+TARGET_ROOT = Path(TARGET_OVERRIDE) if TARGET_OVERRIDE else None
+
+# Output that means the gate could not run, not that the code is wrong. Each of these has been
+# seen: EPERM from a build script writing into a sandboxed project tree, and a toolchain that is
+# not installed. Reporting either as FAIL is the P5 failure this file exists to avoid.
+# Matched on the condition, not on one spelling of it. The first version of this list held
+# `Operation not permitted (os error 1)` and missed the very next real instance, which cargo
+# rendered as `Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }` from
+# a build script's panic. Same condition, two surfaces -- which is the classifier bug this file
+# is otherwise written to avoid, caught here only because the control case was run too.
+TOOLING_FAILURE = (
+    "Operation not permitted",
+    "PermissionDenied",
+    "Permission denied",
+    "error: no such command",
+    "is not installed for the toolchain",
+    "linker `cc` not found",
+)
+
+# Which of those mean "cargo could not write where it was pointed", and so have a known fix.
+PERMISSION_MARKERS = ("Operation not permitted", "PermissionDenied", "Permission denied")
 
 
 class Gate:
@@ -95,13 +121,21 @@ def run_gate(gate: Gate, extra_env: dict | None = None) -> dict:
         return {"gate": gate.name, "verdict": "BLOCKED", "rc": None,
                 "detail": f"{gate.cwd} does not exist; this gate did not run"}
     env = dict(os.environ, **(extra_env or {}))
-    if gate.target:
+    if gate.target and TARGET_ROOT is not None:
         env["CARGO_TARGET_DIR"] = str(TARGET_ROOT / gate.target)
     started = time.monotonic()
     # No shell, no pipeline: the status below is this command's own.
     proc = subprocess.run(gate.cmd, cwd=gate.cwd, env=env, capture_output=True, text=True)
     seconds = round(time.monotonic() - started, 1)
-    tail = (proc.stdout + proc.stderr).strip().split("\n")
+    output = proc.stdout + proc.stderr
+    tail = output.strip().split("\n")
+    if proc.returncode != 0:
+        hit = next((marker for marker in TOOLING_FAILURE if marker in output), None)
+        if hit:
+            fix = (" Set VIBE_IMPROVE_TARGET_DIR to a writable path outside the project; a build "
+                   "script cannot write under it here." if hit in PERMISSION_MARKERS else "")
+            return {"gate": gate.name, "verdict": "BLOCKED", "rc": proc.returncode, "seconds": seconds,
+                    "detail": f"the gate could not run ({hit}); this says nothing about the code.{fix}"}
     return {
         "gate": gate.name,
         "verdict": "PASS" if proc.returncode == 0 else "FAIL",
@@ -116,6 +150,7 @@ def evaluate(only: list[str] | None, extra_env: dict | None = None) -> tuple[str
     print(f"measuring {ROOT}", flush=True)
     print(f"  commit {who['commit']} on {who['branch']}, tree {'clean' if who['tree_clean'] else 'DIRTY'}, "
           f"{who['unpushed']} unpushed", flush=True)
+    print(f"  cargo target {TARGET_ROOT or "cargo default (VIBE_IMPROVE_TARGET_DIR unset)"}", flush=True)
     results = []
     for gate in gates():
         if only and gate.name not in only:
@@ -167,19 +202,33 @@ def self_test() -> int:
     failures += 0 if ok else 1
     print(f"   {'ok' if ok else 'MISMATCH'}  {row['verdict']}")
 
-    print("4. the exit code must carry the verdict, or this is not a gate")
+    print("4. a tooling failure must read BLOCKED, and a real failure must not")
+    cases = [
+        ("Failed to create /x: Operation not permitted (os error 1)", True),
+        ('Err value: Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }', True),
+        ("error: Permission denied (os error 13)", True),
+        ("error[E0308]: mismatched types", False),
+        ("test result: FAILED. 1 passed; 1 failed", False),
+    ]
+    for output, want in cases:
+        hit = any(marker in output for marker in TOOLING_FAILURE)
+        ok = hit == want
+        failures += 0 if ok else 1
+        print(f"   {'ok' if ok else 'MISMATCH'}  {'BLOCKED' if hit else 'FAIL   '}  {output[:62]}")
+
+    print("5. the exit code must carry the verdict, or this is not a gate")
     ok = EXIT == {"ACCEPT": 0, "REJECT": 1, "BLOCKED": 2}
     failures += 0 if ok else 1
     print(f"   {'ok' if ok else 'MISMATCH'}  {EXIT}")
 
-    print("5. one FAIL among passes must still REJECT the whole run")
+    print("6. one FAIL among passes must still REJECT the whole run")
     rows = [{"verdict": "PASS"}, {"verdict": "FAIL"}, {"verdict": "PASS"}]
     derived = "REJECT" if any(r["verdict"] == "FAIL" for r in rows) else "ACCEPT"
     ok = derived == "REJECT"
     failures += 0 if ok else 1
     print(f"   {'ok' if ok else 'MISMATCH'}  {derived}")
 
-    print("6. BLOCKED must not be reported as ACCEPT")
+    print("7. BLOCKED must not be reported as ACCEPT")
     rows = [{"verdict": "PASS"}, {"verdict": "BLOCKED"}]
     derived = ("REJECT" if any(r["verdict"] == "FAIL" for r in rows)
                else "BLOCKED" if any(r["verdict"] == "BLOCKED" for r in rows) else "ACCEPT")
