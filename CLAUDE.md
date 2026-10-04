@@ -257,10 +257,13 @@ Both levers self-test inside `chore ci` (`chore improve-selftest`). `evaluate.py
 proves all three verdicts are reachable; `route.py --self-test` proves a banned or missing playbook
 route is refused. A lever nobody checks is a lever that rots.
 
-This is not `/autofix`. That skill describes the same shape and none of its machinery is installed
-here — no `scripts/autofix/`, no `autofix_*` MCP tools, no npm scripts, and the skill directory
-holds one file. `scripts/improve/README.md` has the measurement and says which of its ideas were
-worth taking.
+Nightly is opt-in. `scripts/improve/com.vibe.improve.plist` is the durable schedule and is not
+loaded; arming it lets an agent edit this repo unattended, under the rules in `night.py` — branch
+only, revert on a failed gate, stop after two cycles without an ACCEPT, never push.
+
+`/autofix` is the same shape and its machinery lives in `~/Downloads/ucamp-poc/scripts/autofix/`,
+not here. Its loop driver fits and `night.sh` follows it; its `evaluate.sh` runs `npm run build`
+and `npm test`, which this repo does not have. `scripts/improve/README.md` has the comparison.
 
 ## pstack playbooks, and the three not to run
 

@@ -10,21 +10,56 @@ chore gates          ACCEPT (exit 0) -> commit.  REJECT (1) or BLOCKED (2) -> re
 
 Weekly, `.github/workflows/gates.yml` runs the same gate with nothing path-filtered out.
 
-## Why this is not `/autofix`
+Nightly, if armed:
 
-The `autofix` skill describes this loop well and none of its machinery is installed. Measured on
-2026-10-05:
+```
+chore night-begin    refuse, or open improve/MMDD and name the first item
+  ... the agent does that one item, then gates it ...
+night.py finish --item <id> --verdict ACCEPT|REJECT|BLOCKED
+chore night-report   plans/improve/report.md
+```
 
-| What `autofix/SKILL.md` instructs | Present |
-|---|---|
-| `scripts/autofix/` — `program.md`, `evaluate.sh`, `quality-backlog.json`, `safety.json`, `dashboard.js`, … | no |
-| MCP tools `autofix_next_issue`, `_evaluate`, `_commit`, `_discard`, `_status`, `_scan` | none; `ToolSearch` matches nothing |
-| `npm run autofix:start` and the other six scripts | no |
-| Files the skill itself ships | 1 — `SKILL.md` |
+Two ways to arm it, and they are not equivalent. A `CronCreate` job inside a Claude session fires
+only while that session's REPL is idle, is never written to disk, and expires after seven days —
+fine for tonight, wrong for "nightly". `com.vibe.improve.plist` is the durable one and is **not
+installed**: loading it lets an agent edit this repository while nobody is watching, which is a
+decision to make rather than a side effect of cloning.
 
-So `/autofix` here is a document describing infrastructure that does not exist, which is the
-failure mode this repository's own `CLAUDE.md` calls P5: a guard installed and never run. The
-*shape* it describes is right, and this directory is that shape built from parts that do exist.
+```
+cp scripts/improve/com.vibe.improve.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.vibe.improve.plist
+```
+
+## Its relationship to `/autofix`
+
+`autofix` is real, and an earlier version of this file said it was not. The correction matters
+because the wrong version would send someone looking for nothing.
+
+Its machinery lives in another repository — `~/Downloads/ucamp-poc/scripts/autofix/`, 38 files:
+`loop.sh` (474 lines, a bash PDCA loop driving `claude --print`), `evaluate.sh`, `safety.json`,
+risk/STRIDE/sentry scanners, an MCP server and a `universal-install.sh`. There is a loaded-by-hand
+LaunchAgent for it at `~/Library/LaunchAgents/com.tasc.autofix.plist`. What is absent is any of it
+*in this repository*, and the six `autofix_*` MCP tools in this session.
+
+The honest question was never "does it exist" but "would it fit here", and the answer is half.
+
+**Its loop driver fits.** `night.sh` is the same shape and says so: bash around `claude --print`,
+because `--print` is one-shot and each cycle wants a clean context with the backlog as its memory.
+
+**Its evaluator does not.** `autofix/evaluate.sh` runs `npm run build`, `npm test`, `npm run lint`
+and `npm audit`. This repository has no root `npm test` or `npm run build`: it has `chore`, four
+Cargo workspaces and two separate Node projects. `evaluate.py` is the same job written for this
+tree.
+
+Two of its ideas were taken and two were left:
+
+- **Taken:** a backlog with an explicit next item, and a commit gate that can say no.
+- **Left — the composite score.** ISO 25010 weighted across four dimensions into one number. A
+  number that moves for several reasons does not say which one moved. This reports per-gate
+  verdicts.
+- **Left — the fully unattended cadence.** 36 cycles, 11pm to 5am, with the whole backlog in
+  scope. Here the items a human owns are marked `needs_human` and skipped, and two cycles without
+  an ACCEPT stops the night.
 
 Two of its ideas were worth taking and are here: a backlog with an explicit next item, and a
 commit gate that can say no. Two were not. Its ISO 25010 composite score is a single number over

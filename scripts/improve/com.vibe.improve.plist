@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The durable nightly schedule. Not installed by default: loading it lets an agent edit this
+  repository while nobody is watching, which is the user's call to make, not a side effect of
+  cloning. `scripts/improve/night.py` holds the rules it runs under.
+
+    cp scripts/improve/com.vibe.improve.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.vibe.improve.plist
+
+  Modelled on com.tasc.autofix.plist, which already exists on this machine for another repo.
+  A different Label, so the two never collide.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vibe.improve</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/joeliu/Downloads/vibe/scripts/improve/night.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joeliu/Downloads/vibe</string>
+
+    <!-- 23:07, off the hour: every scheduler in the world fires at :00. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>23</integer>
+        <key>Minute</key>
+        <integer>7</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/joeliu/Library/Logs/VibeImprove/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/joeliu/Library/Logs/VibeImprove/launchd-stderr.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>5</integer>
+
+    <!-- One run per hour at most, however the calendar fires. -->
+    <key>ThrottleInterval</key>
+    <integer>3600</integer>
+
+    <!-- Kill the claude and cargo children when the job stops. -->
+    <key>AbandonProcessGroup</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/joeliu/.local/bin</string>
+        <key>VIBE_IMPROVE_ROOT</key>
+        <string>/Users/joeliu/Downloads/vibe</string>
+        <key>VIBE_IMPROVE_CLAUDE</key>
+        <string>/Users/joeliu/.local/bin/claude</string>
+    </dict>
+</dict>
+</plist>
