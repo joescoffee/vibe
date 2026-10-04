@@ -63,13 +63,22 @@ export default function HandoffTranscriptSaver() {
 			if (payload?.state !== 'done') return
 
 			const segments = usableSegments(payload)
-			// The backend may not carry the transcript yet; better nothing than an empty record.
-			if (segments.length === 0) return
-
 			const sourcePath = payload.savedPath ?? payload.saved_path ?? ''
+			// The backend may not carry the transcript yet. With no audio either there is nothing
+			// worth a project folder; with audio, the folder is what rescues it -- see below.
+			if (segments.length === 0 && !sourcePath) return
+
 			const name = autoProjectName(payload.name?.trim() || m.phoneRecording(), 'record')
-			// Same rule as a local transcription: auto-save only when the user asked for it.
-			if (!preferenceRef.current.saveTranscripts) return
+			// Not the rule a local *transcription* follows, and the comment at session.tsx:158 names
+			// this file as one that does. It was wrong about this one. `transfer.rs` stages the phone
+			// recording in `get_vibe_temp_folder()`, which `cleaner.rs` globs and `setup.rs` deletes
+			// on the next launch on a later day, so this save is the only thing that moves the audio
+			// somewhere durable. Gating it means switching the preference off silently destroys every
+			// phone recording -- exactly the hazard the local recording is already exempted from, and
+			// for exactly the same reason. So the switch decides whether the *transcript* is kept;
+			// the audio is kept either way.
+			const keepTranscript = preferenceRef.current.saveTranscripts
+			if (!keepTranscript && !sourcePath) return
 
 			const key = sourcePath || `${name}:${segments.length}:${segments[0].start}`
 			if (savedRef.current.has(key)) return
@@ -81,9 +90,11 @@ export default function HandoffTranscriptSaver() {
 				sourcePath,
 				projectsPath: preferenceRef.current.projectsPath,
 				moveSourceMedia: true,
-				segments,
-				language: payload.language ?? undefined,
-				modelPath: payload.modelPath ?? payload.model_path ?? null,
+				// Same shape as the local recording's rescue save: the audio is saved, the transcript
+				// is not. Nothing here is written that the user asked not to keep.
+				segments: keepTranscript ? segments : [],
+				language: keepTranscript ? (payload.language ?? undefined) : undefined,
+				modelPath: keepTranscript ? (payload.modelPath ?? payload.model_path ?? null) : null,
 			}).then((savedTranscript) => {
 				if (!savedTranscript) {
 					// Let it be retried if the same recording is announced again.
@@ -93,7 +104,7 @@ export default function HandoffTranscriptSaver() {
 				notifyTranscriptsChanged()
 				// Quiet, non-modal: the transcription happened while the user was looking elsewhere,
 				// so a single line telling them where it went is worth more than silence.
-				toast.success(m.phoneTranscriptionSaved(), { description: name, position: 'bottom-right' })
+				toast.success(keepTranscript ? m.phoneTranscriptionSaved() : m.phoneRecordingSaved(), { description: name, position: 'bottom-right' })
 			})
 		})
 

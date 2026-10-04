@@ -86,6 +86,15 @@ pub fn setup(app: &App) -> Result<(), Box<dyn std::error::Error>> {
             tracing::error!("Crash exception code: {:?}", info);
 
             if let Some(app_handle) = STATIC_APP.lock().expect("lock").as_ref() {
+                // The marker the next launch reads. Nothing wrote it until now: `is_crashed_recently`
+                // and `rename_crash_file` have always been a reader and a cleanup for a file that no
+                // code in the tree produced, so the warning they exist to show could never appear.
+                // Written before the dialog, because the dialog blocks and the process may not
+                // survive it.
+                let marker = crate::cmd::app::crash_marker_path(app_handle);
+                if let Err(error) = std::fs::write(&marker, format!("{:?}\n", info)) {
+                    tracing::error!("could not write crash marker {}: {:?}", marker.display(), error);
+                }
                 app_handle
                     .dialog()
                     .message("App crashed with error. Please register to Github and then click report.")

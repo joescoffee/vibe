@@ -79,7 +79,10 @@ export interface BatchProgress {
 }
 
 export interface BatchSummary {
+	/** Files the run started with. */
 	total: number
+	/** Files that actually produced a transcript: `total` minus the failed and the cancelled. */
+	transcribed: number
 	seconds: number
 	exported: number
 	skipped: number
@@ -466,7 +469,19 @@ export function useTranscribeQueue(): TranscribeQueue {
 						},
 					})
 					const seconds = Math.round((performance.now() - startedAt) / 1000)
-					patch(next.id, { status: 'done', progress: 100, segments: result.segments, seconds })
+					// An abort resolves as a success carrying the partial segments, so only these flags
+					// tell them apart. Reading them here rather than fifteen lines down is the whole
+					// fix: Cancel used to produce `status: 'done'`, a green check, a finish sound, and
+					// a partial transcript written to Recents as a finished project -- and, when the
+					// job already had one, written *over* the complete transcript it was re-running.
+					const aborted = abortCurrentRef.current || abortAllRef.current
+					patch(next.id, { status: aborted ? 'cancelled' : 'done', progress: aborted ? 0 : 100, segments: result.segments, seconds })
+					if (aborted) {
+						// The partial text stays on screen -- the user can read it and export it -- but
+						// nothing persists it, because a cancelled run is not a result.
+						trackTranscribeCancelled('main', next.path)
+						continue
+					}
 					completedAny = true
 					runDone += 1
 					runSeconds += seconds
@@ -492,13 +507,8 @@ export function useTranscribeQueue(): TranscribeQueue {
 					} else {
 						persist(next, result.segments)
 					}
-					if (!abortCurrentRef.current && !abortAllRef.current) void autoExportJob(next, result.segments)
-					// An abort resolves as a success carrying the partial segments, so only these flags tell them apart.
-					if (abortCurrentRef.current || abortAllRef.current) {
-						trackTranscribeCancelled('main', next.path)
-					} else {
-						trackTranscribeSucceeded('main', { durationSeconds: seconds, segmentsCount: result.segments.length })
-					}
+					void autoExportJob(next, result.segments)
+					trackTranscribeSucceeded('main', { durationSeconds: seconds, segmentsCount: result.segments.length })
 				} catch (error) {
 					if (abortCurrentRef.current || abortAllRef.current) {
 						patch(next.id, { status: 'cancelled', progress: 0 })
@@ -557,6 +567,10 @@ export function useTranscribeQueue(): TranscribeQueue {
 				const counts = summarizeResults(results)
 				const summary: BatchSummary = {
 					total: runTotal,
+					// The card used to say `total` here and the notification said `runDone`, from the
+					// same run, to the same user, a second apart. Ten files with three failures read
+					// as "10 files" with a green check next to a notification saying 7.
+					transcribed: runDone,
 					seconds: Math.round((Date.now() - runStartedAt) / 1000),
 					...counts,
 					folder: sharedFolder(results),

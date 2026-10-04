@@ -1,4 +1,4 @@
-import { Check, FolderOpen, X } from 'lucide-react'
+import { AlertTriangle, Check, FolderOpen, X } from 'lucide-react'
 import { useState } from 'react'
 import { m } from '~/paraglide/messages.js'
 import { Button } from '~/components/ui/button'
@@ -40,15 +40,23 @@ export default function BatchBanner() {
 	const summary = batchSummary
 	const minutes = Math.max(1, Math.round(summary.seconds / 60))
 	const exportedAny = summary.exported + summary.skipped + summary.fallback + summary.failed > 0
+	// A run where files failed or were cancelled is not a success, and the check mark used to be
+	// unconditional -- the one glyph most likely to be read instead of the text beside it.
+	const incomplete = summary.transcribed < summary.total
 
 	return (
 		<div className="mx-4 mt-3 rounded-xl border border-border bg-muted/50 px-3.5 py-3 text-[12px]">
 			<div className="flex items-start gap-3">
-				<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
-					<Check className="h-3 w-3" strokeWidth={2.6} />
+				<span
+					className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${incomplete ? 'bg-destructive/15 text-destructive' : 'bg-success/15 text-success'}`}>
+					{incomplete ? <AlertTriangle className="h-3 w-3" strokeWidth={2.6} /> : <Check className="h-3 w-3" strokeWidth={2.6} />}
 				</span>
 				<div className="min-w-0 flex-1">
-					<p className="font-medium text-foreground">{m.batchFinishedHeadline({ total: String(summary.total), minutes: String(minutes) })}</p>
+					<p className="font-medium text-foreground">
+						{incomplete
+							? m.batchFinishedPartialHeadline({ done: String(summary.transcribed), total: String(summary.total), minutes: String(minutes) })
+							: m.batchFinishedHeadline({ total: String(summary.total), minutes: String(minutes) })}
+					</p>
 					<p className="mt-0.5 text-muted-foreground">
 						{exportedAny
 							? [
@@ -59,7 +67,7 @@ export default function BatchBanner() {
 								]
 									.filter(Boolean)
 									.join(', ')
-							: m.batchFinishedFiles({ count: String(summary.total) })}
+							: m.batchFinishedFiles({ count: String(summary.transcribed) })}
 						{summary.exceptions.length > 0 && (
 							<>
 								{' · '}

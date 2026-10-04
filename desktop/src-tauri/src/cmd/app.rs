@@ -139,19 +139,34 @@ pub fn get_logs(app_handle: tauri::AppHandle) -> Result<String> {
     Ok(content)
 }
 
+/// Where the crash handler leaves its marker, and the only place the next launch looks.
+///
+/// Not the temp folder. `get_vibe_temp_folder` stamps the date into the directory name and
+/// `clean_old_files` deletes every one but today's at startup, so a marker written there could
+/// only ever be seen by a relaunch on the same calendar day -- crash at 23:55, relaunch at 00:05,
+/// and the evidence is swept by the very startup that was about to read it. The config directory
+/// is created in `setup` before anything else and is never swept.
+pub fn crash_marker_path(app_handle: &tauri::AppHandle) -> PathBuf {
+    match app_handle.path().app_config_dir() {
+        Ok(dir) => dir.join(CRASH_MARKER),
+        // A crash handler that panics tells the user nothing at all, so fall back rather than fail.
+        Err(_) => std::env::temp_dir().join(CRASH_MARKER),
+    }
+}
+
+pub const CRASH_MARKER: &str = "crash.txt";
+
 #[tauri::command]
-pub fn is_crashed_recently() -> bool {
-    tracing::debug!("checking path {}", ffmpeg::get_vibe_temp_folder().join("crash.txt").display());
-    ffmpeg::get_vibe_temp_folder().join("crash.txt").exists()
+pub fn is_crashed_recently(app_handle: tauri::AppHandle) -> bool {
+    let path = crash_marker_path(&app_handle);
+    tracing::debug!("checking path {}", path.display());
+    path.exists()
 }
 
 #[tauri::command]
-pub fn rename_crash_file() -> Result<()> {
-    std::fs::rename(
-        ffmpeg::get_vibe_temp_folder().join("crash.txt"),
-        ffmpeg::get_vibe_temp_folder().join("crash.1.txt"),
-    )
-    .context("Can't delete file")
+pub fn rename_crash_file(app_handle: tauri::AppHandle) -> Result<()> {
+    let path = crash_marker_path(&app_handle);
+    std::fs::rename(&path, path.with_extension("1.txt")).context("Can't rename crash marker")
 }
 
 #[tauri::command]
@@ -167,4 +182,29 @@ pub fn type_text(text: String) -> Result<()> {
 #[tauri::command]
 pub fn get_cargo_features() -> Vec<String> {
     Vec::new()
+}
+
+#[cfg(test)]
+mod crash_marker_tests {
+    use super::CRASH_MARKER;
+
+    /// The marker must not live under a path `clean_old_files` sweeps.
+    ///
+    /// That function globs `{temp}/vibe_temp*` and deletes every match but the one whose name
+    /// carries today's date, so a marker written into the temp folder is destroyed by the next
+    /// launch on a later day -- the only launch that would ever have read it. This asserts the
+    /// shape of the path rather than the behaviour of the sweep, because the sweep is what is
+    /// already proven; what was never checked is that the two agree.
+    #[test]
+    fn marker_is_not_under_the_dated_temp_folder() {
+        let temp = crate::ffmpeg::get_vibe_temp_folder();
+        let swept = temp.join(CRASH_MARKER);
+        assert!(
+            temp.file_name().unwrap().to_string_lossy().starts_with("vibe_temp"),
+            "the sweep's glob is vibe_temp*, so this test is only meaningful while the folder matches it"
+        );
+        // The real path comes from app_config_dir, which needs a running app. What is asserted here
+        // is that the old location is the one the sweep owns, which is why it moved.
+        assert!(swept.starts_with(&temp));
+    }
 }

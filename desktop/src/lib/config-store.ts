@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { load, type Store } from '@tauri-apps/plugin-store'
 import { useCallback, useRef, useSyncExternalStore } from 'react'
@@ -20,6 +21,35 @@ const CONFIG_CHANGED_EVENT = 'config-changed'
 let store: Store | null = null
 const cache = new Map<string, unknown>()
 const listeners = new Map<string, Set<() => void>>()
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Put the whole file on disk through the Rust atomic writer instead of the plugin's save.
+ *
+ * `tauri-plugin-store` saves with a plain write, which truncates first: a crash or a reader
+ * arriving mid-save sees half a file, and this file holds `model.path`, `api.baseUrl`, the handoff
+ * device credentials and the LLM API keys. `write_config_atomically` was written for exactly this
+ * and had no caller -- a guard installed and never run. The plugin keeps its in-memory cache and
+ * its cross-window `onChange`; only the disk write moves.
+ *
+ * Debounced on the same 300 ms the plugin's `autoSave` used, so a dragged slider still costs one
+ * write. Nothing flushes before `loadConfigStore` finishes, or an early write would put an empty
+ * cache over a full file.
+ */
+function scheduleFlush() {
+	if (!store) return
+	if (flushTimer) clearTimeout(flushTimer)
+	flushTimer = setTimeout(() => {
+		flushTimer = null
+		const contents = JSON.stringify(Object.fromEntries(cache), null, 2)
+		void invoke('write_config_atomically', { contents }).catch((error) => {
+			// Falling back keeps a failed atomic write from losing the setting entirely; the
+			// non-atomic save is what every write did before this existed.
+			console.error('atomic config write failed, falling back to the plugin save:', error)
+			void store?.save()
+		})
+	}, 300)
+}
 
 function notify(key: string) {
 	for (const listener of listeners.get(key) ?? []) listener()
@@ -28,8 +58,8 @@ function notify(key: string) {
 /** Must finish before the first render, or every setting would flash its default. */
 export async function loadConfigStore() {
 	try {
-		// autoSave batches the disk writes: a slider being dragged costs one save, not fifty.
-		store = await load(config.storeFilename, { autoSave: 300, defaults: {} })
+		// autoSave off: `scheduleFlush` does the batching, and it writes atomically.
+		store = await load(config.storeFilename, { autoSave: false, defaults: {} })
 		for (const [key, value] of await store.entries()) cache.set(key, value)
 		await store.onChange((key, value) => {
 			if (value === undefined) cache.delete(key)
@@ -65,7 +95,10 @@ export function writeConfig<T>(key: string, value: T) {
 	cache.set(key, value)
 	notify(key)
 	// Fire and forget, like the old localStorage write: the screen must not wait on the disk.
+	// `store.set` keeps the plugin's cache and its cross-window change event; the disk write is
+	// the debounced atomic one.
 	void store?.set(key, value)
+	scheduleFlush()
 }
 
 /** Remove a setting from both the live cache and the persisted config file. */
@@ -73,6 +106,7 @@ export function deleteConfig(key: string) {
 	cache.delete(key)
 	notify(key)
 	void store?.delete(key)
+	scheduleFlush()
 }
 
 function subscribe(key: string, listener: () => void) {

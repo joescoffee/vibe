@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -13,7 +14,7 @@ import { describe, expect, it } from 'vitest'
  * hand-written list -- a new one is then covered the day it is added -- and forbid `void` on them.
  */
 
-const SRC = join(import.meta.dirname, '..')
+const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
 const STORE = join(SRC, 'lib', 'transcripts-store.ts')
 
 /** Exported async functions of the store whose return value is the only way a failure is visible. */
