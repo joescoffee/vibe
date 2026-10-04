@@ -21,8 +21,14 @@ pub struct Segment {
 /// -- for Chinese, YouTube subscribe boilerplate -- and then keeps answering with it. What
 /// identifies that is not the phrase, which drifts ("我们的朋友们" -> "我们的朋友" ->
 /// "谢谢大家的朋友们"), and not one line's share of the transcript, which the drift keeps
-/// under any useful threshold. It is that the same line comes back *consecutively*. Speech
-/// does not repeat itself back to back; a stuck decoder does nothing else.
+/// under any useful threshold. It is that the same line comes back *consecutively*: a stuck
+/// decoder does nothing else.
+///
+/// Speech, however, does repeat itself back to back -- which is why this measure may only warn.
+/// `a_genuine_interview_can_look_like_a_loop` below scores real Mandarin speech at 34.1%, and the
+/// recording that prompted the rule reached 45%. Those sit on the same scale as a stuck decoder's
+/// 99%, not in a separate population, so no threshold here is safe to gate on. See the warn-only
+/// call site in `cmd/transcribe.rs`.
 ///
 /// Calibrated on real transcripts from this machine rather than on invented ones:
 ///
@@ -52,7 +58,10 @@ pub fn consecutive_repeat_share(segments: &[Segment]) -> f64 {
 /// Shortest transcript worth judging. Below this a run of identical lines can be real.
 pub const MIN_SEGMENTS_TO_JUDGE: usize = 10;
 
-/// Sits between the worst genuine transcript measured (15.4%) and the best looped one (32.5%).
+/// Separates the calibration set measured here (worst genuine 15.4%, best looped 32.5%) -- but
+/// that gap does not generalise: genuine speech has since been measured at 34.1% and 45%. This is
+/// a reporting threshold, never a gate. One of the six "normal" transcripts used to calibrate it
+/// turned out to be looping itself, which is why the gap it appears to sit in is not trustworthy.
 pub const DEGENERATE_REPEAT_SHARE: f64 = 0.25;
 
 /// The looped line and how much of the transcript it took, or `None` if the output looks real.
@@ -141,7 +150,7 @@ mod repetition_tests {
         // is perfectly good. The transcript that prompted this measured 45%.
         //
         // An earlier version returned an error on this score. The queue only persists on the
-        // success path (use-transcribe-queue.ts:428), so the user lost the whole
+        // success path (use-transcribe-queue.ts:484), so the user lost the whole
         // transcription -- three times, at six to eight minutes each.
         let texts = [
             "另外還要請教",

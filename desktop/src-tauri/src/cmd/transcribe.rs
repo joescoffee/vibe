@@ -123,7 +123,8 @@ pub async fn transcribe(
                 trimmed_path = Some(candidate);
             }
             // Trimming is an optimisation, not a requirement. If it fails, transcribe the
-            // original and let the degenerate-output check catch a loop if one happens.
+            // original; a loop will then be reported by the degenerate-output check below --
+            // reported, not caught. That check stopped gating anything in 0cd7f233.
             Err(error) => tracing::warn!("could not trim the non-speech head: {error:#}"),
         }
     }
