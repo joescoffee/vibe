@@ -113,6 +113,12 @@ export interface TranscribeQueue {
 	updateSegmentText: (jobId: string, segmentIndex: number, text: string) => void
 	/** Rename the visible project and its persisted record, when one exists. */
 	renameJob: (jobId: string, name: string) => Promise<boolean>
+	/**
+	 * Follow a project the sidebar renamed, or release one it deleted. `null` means deleted: the job
+	 * stays on screen but stops claiming a folder. Pass the entry `renameTranscript` returned, never
+	 * a path reconstructed by the caller -- collision handling can pick a different folder name.
+	 */
+	retargetProject: (oldPath: string, next: { path: string; mediaPath?: string | null } | null) => void
 	/** Update the visible title while the inline rename editor is open. */
 	previewJobName: (jobId: string, name: string) => void
 	/** Attach an AI summary to a job. Persists to the job's saved file when it has one. */
@@ -266,6 +272,9 @@ export function useTranscribeQueue(): TranscribeQueue {
 		},
 		[select],
 	)
+
+	/** Jobs whose write-back failure has already been reported, so a broken disk reports once. */
+	const writeBackFailedRef = useRef<Set<string>>(new Set())
 
 	const serializeProjectOperation = useCallback(<T>(jobId: string, operation: () => Promise<T>): Promise<T> => {
 		const previous = projectOperationsRef.current.get(jobId) ?? Promise.resolve()
@@ -665,6 +674,29 @@ export function useTranscribeQueue(): TranscribeQueue {
 	)
 
 	/**
+	 * Fire-and-forget write-back that still says something when it fails.
+	 *
+	 * The edit stays on screen either way -- an unwritable record must not cost the user their work.
+	 * But `updateTranscript*` answers `false` for a record that is missing or unwritable, and
+	 * discarding that answer is what let a sidebar rename turn every later edit into a screen-only
+	 * change. Reported once per job, because these fire per edit and a broken disk stays broken.
+	 */
+	const writeBack = useCallback(
+		(jobId: string, write: Promise<boolean>) => {
+			void write.then((written) => {
+				if (written || writeBackFailedRef.current.has(jobId)) return
+				writeBackFailedRef.current.add(jobId)
+				const job = jobsRef.current.find((candidate) => candidate.id === jobId)
+				setErrorModal?.({
+					open: true,
+					log: `An edit to ${job?.name ?? 'this transcript'} could not be written to its project folder. It is still on screen -- export it before closing. The reason is in the app log.`,
+				})
+			})
+		},
+		[setErrorModal],
+	)
+
+	/**
 	 * Replace the text of one segment. The write back to the store is fire-and-forget for the same
 	 * reason `persist` is: an unwritable file must not cost the user their edit on screen.
 	 */
@@ -675,9 +707,9 @@ export function useTranscribeQueue(): TranscribeQueue {
 			if (!job || !segment || segment.text === text) return
 			const segments = job.segments.map((item, index) => (index === segmentIndex ? { ...item, text } : item))
 			commit(jobsRef.current.map((candidate) => (candidate.id === jobId ? { ...candidate, segments } : candidate)))
-			if (job.savedPath) void updateTranscriptSegments(job.savedPath, segments)
+			if (job.savedPath) writeBack(job.id, updateTranscriptSegments(job.savedPath, segments))
 		},
-		[commit],
+		[commit, writeBack],
 	)
 
 	const setSegmentSpeaker = useCallback(
@@ -687,9 +719,9 @@ export function useTranscribeQueue(): TranscribeQueue {
 			if (!job || !segment || segment.speaker === speaker) return
 			const segments = job.segments.map((item, index) => (index === segmentIndex ? { ...item, speaker } : item))
 			commit(jobsRef.current.map((candidate) => (candidate.id === jobId ? { ...candidate, segments } : candidate)))
-			if (job.savedPath) void updateTranscriptSegments(job.savedPath, segments)
+			if (job.savedPath) writeBack(job.id, updateTranscriptSegments(job.savedPath, segments))
 		},
-		[commit],
+		[commit, writeBack],
 	)
 
 	const renameJob = useCallback(
@@ -718,6 +750,29 @@ export function useTranscribeQueue(): TranscribeQueue {
 		[patch, serializeProjectOperation],
 	)
 
+	/**
+	 * Follow a project the sidebar just renamed, or let go of one it deleted.
+	 *
+	 * The sidebar owns the store and the queue owns `savedPath`, and nothing joined them: the
+	 * sidebar's rename discarded the new path, so every later edit wrote to a folder that no longer
+	 * existed. `TRANSCRIPTS_CHANGED_EVENT` cannot carry this -- it says "the list moved", not "this
+	 * path became that one". Serialized on the job so it cannot interleave with a title-bar rename
+	 * of the same project.
+	 */
+	const retargetProject = useCallback(
+		(oldPath: string, next: { path: string; mediaPath?: string | null } | null) => {
+			const job = jobsRef.current.find((candidate) => candidate.savedPath === oldPath)
+			if (!job) return
+			void serializeProjectOperation(job.id, async () => {
+				// A deleted project leaves the job on screen as an unsaved session rather than one
+				// bound to a dead folder, which is what `liveJobs` in the sidebar already means.
+				patch(job.id, next ? { savedPath: next.path, path: next.mediaPath ?? job.path } : { savedPath: undefined })
+				writeBackFailedRef.current.delete(job.id)
+			})
+		},
+		[patch, serializeProjectOperation],
+	)
+
 	const previewJobName = useCallback((jobId: string, name: string) => patch(jobId, { name }), [patch])
 
 	/** Same fire-and-forget write-back as the segment edits: the screen must not wait on the disk. */
@@ -726,9 +781,9 @@ export function useTranscribeQueue(): TranscribeQueue {
 			const job = jobsRef.current.find((candidate) => candidate.id === jobId)
 			if (!job || job.summary === summary) return
 			commit(jobsRef.current.map((candidate) => (candidate.id === jobId ? { ...candidate, summary } : candidate)))
-			if (job.savedPath) void updateTranscriptSummary(job.savedPath, summary)
+			if (job.savedPath) writeBack(job.id, updateTranscriptSummary(job.savedPath, summary))
 		},
-		[commit],
+		[commit, writeBack],
 	)
 
 	const setJobThread = useCallback(
@@ -736,9 +791,9 @@ export function useTranscribeQueue(): TranscribeQueue {
 			const job = jobsRef.current.find((candidate) => candidate.id === jobId)
 			if (!job) return
 			commit(jobsRef.current.map((candidate) => (candidate.id === jobId ? { ...candidate, thread } : candidate)))
-			if (job.savedPath) void updateTranscriptThread(job.savedPath, thread)
+			if (job.savedPath) writeBack(job.id, updateTranscriptThread(job.savedPath, thread))
 		},
-		[commit],
+		[commit, writeBack],
 	)
 
 	const setSpeakerName = useCallback(
@@ -751,9 +806,9 @@ export function useTranscribeQueue(): TranscribeQueue {
 			else delete speakerNames[speaker]
 			if ((job.speakerNames?.[speaker] ?? '') === next) return
 			commit(jobsRef.current.map((candidate) => (candidate.id === jobId ? { ...candidate, speakerNames } : candidate)))
-			if (job.savedPath) void updateTranscriptSpeakerNames(job.savedPath, speakerNames)
+			if (job.savedPath) writeBack(job.id, updateTranscriptSpeakerNames(job.savedPath, speakerNames))
 		},
-		[commit],
+		[commit, writeBack],
 	)
 
 	const cancelCurrent = useCallback(() => {
@@ -795,6 +850,7 @@ export function useTranscribeQueue(): TranscribeQueue {
 		hydrate,
 		updateSegmentText,
 		renameJob,
+		retargetProject,
 		previewJobName,
 		setJobSummary,
 		setJobThread,

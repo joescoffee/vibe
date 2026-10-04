@@ -205,7 +205,9 @@ function RecentRow({
 			kind: 'warning',
 		})
 		if (!confirmed) return
-		await deleteTranscript(entry.path)
+		if (!(await deleteTranscript(entry.path))) return
+		// Before the list reload, so the open session stops writing edits into the folder that is gone.
+		queue.retargetProject(entry.path, null)
 		onDeleted()
 	}
 
@@ -218,7 +220,11 @@ function RecentRow({
 		const next = draftName.trim()
 		setRenaming(false)
 		if (!next || next === entry.name) return
-		if (await renameTranscript(entry.path, next)) onRenamed()
+		const renamed = await renameTranscript(entry.path, next)
+		if (!renamed) return
+		// `renameTranscript` moved the folder; without this the open session keeps writing to the old one.
+		queue.retargetProject(entry.path, renamed)
+		onRenamed()
 	}
 
 	if (renaming) {
