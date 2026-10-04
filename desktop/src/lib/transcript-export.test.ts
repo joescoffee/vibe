@@ -130,3 +130,39 @@ describe('serializeTranscriptExport', () => {
 		expect(JSON.parse(serializeTranscriptExport('json', segments, undefined, { ...options, content: 'summary' }))).toHaveProperty('summary', '')
 	})
 })
+
+describe('CSV formula injection', () => {
+	// Transcript text is untrusted by construction: it is whatever was said, or whatever the model
+	// produced from it. Quoting keeps a comma from breaking the column; it does nothing about a
+	// spreadsheet evaluating the cell.
+	const dangerous: Segment[] = [
+		{ start: 0, stop: 100, text: '=cmd|\' /c calc\'!A1' },
+		{ start: 100, stop: 200, text: '+1+1' },
+		{ start: 200, stop: 300, text: '-2-2' },
+		{ start: 300, stop: 400, text: '@SUM(A1)' },
+		{ start: 400, stop: 500, text: 'An ordinary line = with an equals sign inside' },
+	]
+
+	it('neutralises a leading formula character and leaves other text alone', () => {
+		const csv = serializeTranscriptExport('csv', dangerous, '', { ...options, showSpeakers: false })
+		const cells = csv.split('\n').slice(1).map((line) => line.split(',').at(-1))
+		expect(cells).toEqual([
+			`"'=cmd|' /c calc'!A1"`,
+			`"'+1+1"`,
+			`"'-2-2"`,
+			`"'@SUM(A1)"`,
+			`"An ordinary line = with an equals sign inside"`,
+		])
+	})
+})
+
+describe('timestamp formatting', () => {
+	it('rounds a fractional centisecond instead of padding it', () => {
+		// `padStart` on a float printed `00:00:01,234.55999999999995`, which no parser accepts.
+		// Nothing produces fractions today, so this is the guard, not a repro of a live failure.
+		const fractional: Segment[] = [{ start: 123.456, stop: 200, text: 'x' }]
+		const srt = serializeTranscriptExport('srt', fractional, '', options)
+		expect(srt).toContain('00:00:01,235')
+		expect(srt).not.toMatch(/\d{3}\.\d/)
+	})
+})

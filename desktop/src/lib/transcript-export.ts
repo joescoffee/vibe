@@ -163,8 +163,18 @@ function serializeJson(segments: Segment[], summary: string, options: Transcript
 	return JSON.stringify(output, null, 2)
 }
 
+/**
+ * Quoting stops a comma breaking the column. It does not stop a spreadsheet *evaluating* the cell:
+ * Excel, Numbers and LibreOffice all read a leading `=`, `+`, `-`, `@`, tab or CR as the start of
+ * a formula even inside quotes. Transcript text is untrusted by construction -- it is whatever was
+ * said, or whatever a model hallucinated from it -- so a line beginning `=cmd|...` becomes a
+ * formula in the reader's spreadsheet. A leading apostrophe is the conventional neutraliser and
+ * every major spreadsheet strips it on display.
+ */
 function escapeCsv(value: string | number) {
-	return `"${String(value).replace(/"/g, '""')}"`
+	const text = String(value)
+	const neutralised = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
+	return `"${neutralised.replace(/"/g, '""')}"`
 }
 
 function serializeCsv(segments: Segment[], summary: string, options: TranscriptExportOptions) {

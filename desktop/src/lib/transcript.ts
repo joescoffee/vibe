@@ -30,7 +30,12 @@ export function formatTimestamp(seconds: number, alwaysIncludeHours: boolean, de
 		throw new Error('Non-negative timestamp expected')
 	}
 
-	let milliseconds = seconds * 10
+	// Segment timings are centiseconds (`centiseconds()` in cmd/transcribe.rs), so this is the one
+	// conversion in the app. Rounded, not left as-is: a fractional input reaches `padStart` at the
+	// bottom of this function and prints `00:00:01,234.55999999999995`, which no SRT or VTT parser
+	// accepts. Nothing produces fractions today -- a real 187-segment transcript has none -- so
+	// this is one non-integer producer away from an unparseable export rather than a live bug.
+	let milliseconds = Math.round(seconds * 10)
 
 	const hours = Math.floor(milliseconds / 3_600_000)
 	milliseconds -= hours * 3_600_000

@@ -7,10 +7,16 @@ use tauri::{AppHandle, Manager};
 pub async fn glob_files(folder: String, patterns: Vec<String>, recursive: bool) -> Vec<String> {
     let mut files = Vec::new();
 
+    // The folder name is data, not pattern. `Recordings [2025]` is a character class to glob, so
+    // the unescaped form matched nothing and returned an empty vector -- and an empty vector is
+    // what "this folder has no media" looks like, so the drop produced no file, no error and no
+    // log line. Brackets are ordinary in dated folder names; so are `?` and `*` on filesystems
+    // that allow them.
+    let escaped_folder = glob::Pattern::escape(&folder);
     let search_pattern = if recursive {
-        format!("{}/**/*", folder)
+        format!("{}/**/*", escaped_folder)
     } else {
-        format!("{}/*", folder)
+        format!("{}/*", escaped_folder)
     };
 
     match glob::glob(&search_pattern) {
@@ -94,8 +100,10 @@ pub(crate) fn available_path(parent: &Path, stem: &str, extension: &str) -> Path
 pub fn get_save_path(src_path: PathBuf, target_ext: &str) -> Result<Value> {
     let stem = src_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
     let mut new_path = src_path.clone();
-    new_path.set_file_name(stem);
-    new_path.set_extension(target_ext);
+    // Not `set_file_name(stem)` then `set_extension(ext)`. `set_extension` replaces everything
+    // after the *last* dot of the name it is given, and `file_stem` keeps the earlier ones: the
+    // pair turned `2026.01.15 standup.mp4` into `2026.01.srt`. Dates in filenames are ordinary.
+    new_path.set_file_name(format!("{stem}.{target_ext}"));
     let new_filename = new_path.file_name().map(|s| s.to_str()).unwrap_or(Some("Untitled"));
     let new_path = new_path.to_str().context("to_str")?;
     let named_path = json!({"name": new_filename, "path": new_path});
@@ -208,5 +216,56 @@ mod tests {
         let patterns = vec!["mp3".to_string()];
         assert!(!has_matching_extension(Path::new("/tmp/notesmp3"), &patterns));
         assert!(!has_matching_extension(Path::new("/tmp/notes.pdf"), &patterns));
+    }
+}
+
+#[cfg(test)]
+mod save_path_tests {
+    use super::get_save_path;
+    use std::path::PathBuf;
+
+    fn save_path(name: &str, ext: &str) -> String {
+        let value = get_save_path(PathBuf::from(format!("/tmp/{name}")), ext).expect("get_save_path");
+        value["name"].as_str().expect("name").to_string()
+    }
+
+    #[test]
+    fn keeps_every_dot_that_is_part_of_the_name() {
+        // The measured case: `set_file_name(stem)` + `set_extension` truncated at the first dot.
+        assert_eq!(save_path("2026.01.15 standup.mp4", "srt"), "2026.01.15 standup.srt");
+    }
+
+    #[test]
+    fn still_replaces_a_single_extension() {
+        assert_eq!(save_path("meeting.mp4", "srt"), "meeting.srt");
+    }
+
+    #[test]
+    fn a_name_with_no_extension_gains_one() {
+        assert_eq!(save_path("meeting", "srt"), "meeting.srt");
+    }
+}
+
+#[cfg(test)]
+mod glob_files_tests {
+    use super::glob_files;
+
+    /// A folder whose name contains glob metacharacters must still be scanned.
+    #[tokio::test]
+    async fn finds_media_in_a_folder_named_like_a_character_class() {
+        let root = std::env::temp_dir().join(format!("vibe-glob-test-{}", std::process::id()));
+        let folder = root.join("Recordings [2025]");
+        std::fs::create_dir_all(&folder).expect("create");
+        std::fs::write(folder.join("a.mp3"), b"x").expect("write");
+        std::fs::write(folder.join("b.txt"), b"x").expect("write");
+
+        let found = glob_files(folder.to_string_lossy().into_owned(), vec!["mp3".into()], false).await;
+
+        // The negative control is the point: before the escape this returned 0, which is
+        // indistinguishable from an empty folder everywhere downstream.
+        assert_eq!(found.len(), 1, "expected the mp3, got {found:?}");
+        assert!(found[0].ends_with("a.mp3"));
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

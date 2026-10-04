@@ -104,7 +104,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 					setCollectingFolder(false)
 				}
 			}
-			if (files.length) enqueueRef.current(files)
+			if (files.length) {
+				enqueueRef.current(files)
+				return
+			}
+			// Nothing matched. `glob_files` answers an unreadable folder, an empty folder and a
+			// folder of unsupported files all with an empty vector, and `enqueue`'s own
+			// "supports audio and video files" toast is inside the branch this never reaches --
+			// so dropping a .pages file or an empty folder produced no file, no toast and no log
+			// line, which is indistinguishable from the drop not registering at all.
+			if (paths.length) {
+				console.warn('nothing transcribable in', paths)
+				toast.error(m.supportsFormats(), { position: 'bottom-center' })
+			}
 		},
 		[preference.advancedTranscribeOptions.includeSubFolders],
 	)

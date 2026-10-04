@@ -79,6 +79,42 @@ async fn transcribe_error(server_state: &State<'_, Mutex<ServerState>>, error: e
     }
 }
 
+/// A temp file removed when it goes out of scope, however the scope ends.
+///
+/// The trimmed copy used to be deleted by a `remove_file` on the last line of `transcribe`, which
+/// five `return Err` statements and one `?` jump over. Each miss leaves a duplicate of the
+/// recording in the temp folder -- 56 MB for the two-hour file this was found on -- and
+/// `clean_old_files` skips today's folder, so it survives until the date rolls over. A drop guard
+/// is the shape that cannot be routed around: it also covers the early returns added next year.
+struct ScratchFile(PathBuf);
+
+#[cfg(test)]
+mod scratch_file_tests {
+    use super::ScratchFile;
+
+    #[test]
+    fn removes_the_file_on_an_early_return() {
+        let path = std::env::temp_dir().join(format!("vibe-scratch-test-{}.wav", std::process::id()));
+        std::fs::write(&path, b"x").expect("write");
+
+        // The shape the five `return Err` statements make: the guard is alive, the function ends
+        // without reaching any cleanup line, and the file must still be gone afterwards.
+        fn bails(_guard: ScratchFile) -> Result<(), ()> {
+            Err(())
+        }
+        assert!(bails(ScratchFile(path.clone())).is_err());
+        assert!(!path.exists(), "the trimmed copy survived an early return");
+    }
+}
+
+impl Drop for ScratchFile {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_file(&self.0) {
+            tracing::warn!("could not remove the trimmed copy at {}: {error}", self.0.display());
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn transcribe(
     app_handle: tauri::AppHandle,
@@ -109,7 +145,7 @@ pub async fn transcribe(
     // shift every timestamp back by what was skipped so the transcript still lines up with the
     // original recording. `speech_start_secs` returns None unless the head is unambiguous.
     let skipped_secs = crate::ffmpeg::speech_start_secs(&audio_path).unwrap_or(0.0);
-    let mut trimmed_path: Option<PathBuf> = None;
+    let mut trimmed_path: Option<ScratchFile> = None;
     if skipped_secs > 0.0 {
         let extension = audio_path.extension().and_then(|e| e.to_str()).unwrap_or("wav");
         let candidate = crate::ffmpeg::get_vibe_temp_folder().join(format!(
@@ -120,7 +156,7 @@ pub async fn transcribe(
         match crate::ffmpeg::trim_from(&audio_path, &candidate, skipped_secs) {
             Ok(()) => {
                 tracing::info!("skipping {skipped_secs:.0}s of non-speech before transcribing");
-                trimmed_path = Some(candidate);
+                trimmed_path = Some(ScratchFile(candidate));
             }
             // Trimming is an optimisation, not a requirement. If it fails, transcribe the
             // original; a loop will then be reported by the degenerate-output check below --
@@ -162,8 +198,8 @@ pub async fn transcribe(
 
     let start = std::time::Instant::now();
 
-    if let Some(path) = trimmed_path.as_ref() {
-        options.path = path.to_string_lossy().into_owned();
+    if let Some(scratch) = trimmed_path.as_ref() {
+        options.path = scratch.0.to_string_lossy().into_owned();
     }
 
     let stream = match crate::server::ServerProcess::transcribe_stream(&client, &base_url, &options).await {
@@ -249,14 +285,6 @@ pub async fn transcribe(
             "transcript looks degenerate: {:.0}% consecutive repeats of {preview:?} -- keeping it anyway",
             share * 100.0
         );
-    }
-
-    // The trimmed copy is only ever an input to this call. Leaving it behind costs a duplicate
-    // of the recording -- 56 MB for the two-hour file this was found on -- every single time.
-    if let Some(path) = trimmed_path.as_ref() {
-        if let Err(error) = std::fs::remove_file(path) {
-            tracing::warn!("could not remove the trimmed copy at {}: {error}", path.display());
-        }
     }
 
     let elapsed = start.elapsed();

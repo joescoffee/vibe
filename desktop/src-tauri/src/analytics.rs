@@ -99,6 +99,44 @@ fn install_id(app_handle: &AppHandle) -> Option<String> {
 /// Error messages carry a stderr tail and the tail is the half worth having, so the
 /// front is what gets elided. Counting characters (not bytes) keeps the cut on a
 /// UTF-8 char boundary.
+/// Replace anything shaped like a filesystem path with a placeholder.
+///
+/// `error_message` is the one analytics prop carrying free text, and two of the errors that reach
+/// it are `format!("Audio file not found: {}", options.path)` and its sibling -- the user's full
+/// path, which `truncate_keep_tail` then preserves because it keeps the *tail*. The comment at
+/// `analytics.rs:33` promising "never a transcript, filename, saved path" scopes itself to the
+/// handoff events and is true there; the desktop transcribe path had no such guard.
+///
+/// Deliberately coarse. Dropping a token that merely looks path-like costs a word of context in a
+/// dashboard; keeping one costs a filename. The frontend already sends the only fact worth having,
+/// `file_ext`, as its own prop.
+fn redact_paths(value: &str) -> String {
+    fn path_starts_at(rest: &str) -> bool {
+        rest.starts_with('/')
+            || rest.starts_with("~/")
+            || rest.starts_with("\\\\")
+            || rest
+                .as_bytes()
+                .get(1)
+                .is_some_and(|b| *b == b':' && matches!(rest.as_bytes().get(2), Some(b'\\' | b'/')))
+    }
+
+    let bytes = value.as_bytes();
+    for (index, _) in value.char_indices() {
+        // Only at a token boundary, so "and/or" or "24/7" inside a sentence is left alone.
+        let at_boundary = index == 0 || bytes[index - 1].is_ascii_whitespace();
+        if at_boundary && path_starts_at(&value[index..]) {
+            // To the end of the string, not to the next space: paths contain spaces, and the one
+            // that found this was `/Users/someone/Recordings/board meeting.m4a`. Cutting at the
+            // space left the filename behind, which is the whole thing being protected. Every
+            // message that reaches here puts the path last, and over-redacting costs a word of
+            // dashboard context while under-redacting costs a filename.
+            return format!("{}<path>", &value[..index]);
+        }
+    }
+    value.to_string()
+}
+
 fn truncate_keep_tail(value: &str, max_chars: usize) -> String {
     let total = value.chars().count();
     if total <= max_chars {
@@ -157,9 +195,10 @@ pub fn track_event_handle_with_props(app_handle: &AppHandle, event_name: &str, p
         _ => serde_json::Map::new(),
     };
     if let Some(serde_json::Value::String(message)) = merged.get("error_message") {
-        let truncated = truncate_keep_tail(message, MAX_PROP_CHARS);
-        if truncated != *message {
-            merged.insert("error_message".to_string(), truncated.into());
+        // Redact before truncating: truncation keeps the tail, which is exactly where a path ends.
+        let cleaned = truncate_keep_tail(&redact_paths(message), MAX_PROP_CHARS);
+        if cleaned != *message {
+            merged.insert("error_message".to_string(), cleaned.into());
         }
     }
     merged.entry("vibe_commit").or_insert_with(|| env!("COMMIT_HASH").into());
@@ -174,6 +213,63 @@ pub fn track_event_handle_with_props(app_handle: &AppHandle, event_name: &str, p
 
 #[cfg(test)]
 mod tests {
+    use super::redact_paths;
+
+    #[test]
+    fn redacts_the_two_messages_that_actually_carry_a_path() {
+        // Verbatim shapes from cmd/transcribe.rs.
+        assert_eq!(
+            redact_paths("Audio file not found: /Users/someone/Recordings/board meeting.m4a"),
+            "Audio file not found: <path>"
+        );
+        assert_eq!(
+            redact_paths("Path is not a file: /Users/someone/Desktop"),
+            "Path is not a file: <path>"
+        );
+    }
+
+    #[test]
+    fn redacts_the_other_platforms_too() {
+        assert_eq!(redact_paths("not found: C:\\Users\\someone\\a.mp3"), "not found: <path>");
+        assert_eq!(redact_paths("not found: ~/Downloads/a.mp3"), "not found: <path>");
+        assert_eq!(redact_paths("not found: \\\\server\\share\\a.mp3"), "not found: <path>");
+    }
+
+    #[test]
+    fn a_path_with_spaces_is_redacted_whole() {
+        // The case that broke the first attempt: a token-wise redactor cut at the space and left
+        // `meeting.m4a` behind, which is the filename this exists to keep out.
+        assert_eq!(
+            redact_paths("Audio file not found: /Users/someone/Recordings/board meeting.m4a"),
+            "Audio file not found: <path>"
+        );
+    }
+
+    #[test]
+    fn a_slash_inside_a_word_is_not_a_path() {
+        assert_eq!(redact_paths("retry 24/7 and/or report"), "retry 24/7 and/or report");
+    }
+
+    #[test]
+    fn leaves_an_ordinary_message_alone() {
+        // A redactor that eats everything would pass the tests above and tell us nothing.
+        let message = "model load failed with GPU enabled, falling back to CPU";
+        assert_eq!(redact_paths(message), message);
+        assert_eq!(
+            redact_paths("bad magic 0x230a2323, 9344 bytes"),
+            "bad magic 0x230a2323, 9344 bytes"
+        );
+    }
+
+    #[test]
+    fn a_redacted_path_survives_truncation() {
+        // truncate_keep_tail keeps the *tail*, which is where a path ends -- so redaction has to
+        // happen first. This is the ordering, asserted.
+        let long = format!("prefix {} /Users/someone/{}.m4a", "x".repeat(300), "y".repeat(50));
+        let cleaned = super::truncate_keep_tail(&redact_paths(&long), super::MAX_PROP_CHARS);
+        assert!(!cleaned.contains("/Users/"), "got {cleaned}");
+        assert!(cleaned.contains("<path>"), "got {cleaned}");
+    }
     use super::*;
 
     #[test]

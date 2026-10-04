@@ -1,9 +1,19 @@
 import { RotateCcw } from 'lucide-react'
 import { m } from '~/paraglide/messages.js'
-import { Input } from '~/components/ui/input'
 import { Switch } from '~/components/ui/switch'
-import { ActionRow, SettingsGroup, SettingsRow, rowControlClass, type SettingsViewModel } from './shared'
+import { defaultOptions } from '~/providers/preference'
+import { ActionRow, SettingsGroup, SettingsRow, type SettingsViewModel } from './shared'
 
+/**
+ * "Custom command" used to live here. It had no reader: `custom_command` appears in Rust as a
+ * struct field and a `None` in its `Default`, and nowhere else, so whatever was typed went into
+ * `transcription.ffmpegOptions` and was never used. It is not wired up here either, because
+ * `ffmpeg::normalize`'s doc comment says why: the value lands in an option position, ffmpeg has no
+ * `--` separator, and an injected `-y` or a second output path takes effect. Wiring it needs an
+ * explicit allowlist, not a split on whitespace. A control that writes attacker-shaped text into
+ * the config file and does nothing is worse than no control, so it is gone until that exists. The
+ * field stays in the type and in `defaultOptions` so an existing config still parses.
+ */
 export function AudioProcessingSection({ vm }: { vm: SettingsViewModel }) {
 	return (
 		<div className="space-y-6">
@@ -14,24 +24,13 @@ export function AudioProcessingSection({ vm }: { vm: SettingsViewModel }) {
 						onCheckedChange={(checked) => vm.preference.setFfmpegOptions({ ...vm.preference.ffmpegOptions, normalize_loudness: checked })}
 					/>
 				</SettingsRow>
-				<SettingsRow
-					label={m.customFfmpegCommand()}
-					description="ffmpeg -i {input} -ar 16000 -ac 1 -c:a pcm_s16le {custom_command} -hide_banner -y -loglevel error">
-					<Input
-						value={vm.preference.ffmpegOptions.custom_command ?? ''}
-						onChange={(e) => vm.preference.setFfmpegOptions({ ...vm.preference.ffmpegOptions, custom_command: e.target.value || null })}
-						placeholder={vm.preference.ffmpegOptions.normalize_loudness ? '-af loudnorm=I=-16:TP=-1.5:LRA=11' : '-af ...'}
-						type="text"
-						className={`w-64 ${rowControlClass}`}
-					/>
-				</SettingsRow>
 			</SettingsGroup>
 			<SettingsGroup>
 				<ActionRow
 					label={m.resetAudioProcessing()}
 					icon={<RotateCcw className="h-4 w-4" />}
 					activateOnClick
-					onClick={() => vm.preference.setFfmpegOptions({ normalize_loudness: false, custom_command: null })}
+					onClick={() => vm.preference.setFfmpegOptions(defaultOptions.ffmpegOptions)}
 				/>
 			</SettingsGroup>
 		</div>

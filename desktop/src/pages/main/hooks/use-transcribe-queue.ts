@@ -173,7 +173,10 @@ async function buildSharedOptions(preference: Preference) {
 	const diarizePath = `${modelsFolder}/${config.diarizeModelFilename}`
 	const diarizeReady = preference.diarizeEnabled && (await isModelFileUsable(diarizePath))
 	if (preference.diarizeEnabled && !diarizeReady) {
+		// A console line is not a channel. Someone whose model was deleted, or who carried the old
+		// default-on forward, got a transcript with no speakers and nothing saying why.
 		console.warn(`speaker recognition is on but ${config.diarizeModelFilename} is missing; transcribing without it`)
+		toast.warning(m.diarizationModelMissing(), { position: 'bottom-center', duration: 8000 })
 	}
 	return {
 		...(diarizeReady ? { diarize_model: diarizePath } : {}),

@@ -48,7 +48,14 @@ export async function toDocx(title: string, segments: Segment[], direction: 'rtl
 			alignment,
 			bidirectional: isRtl,
 			spacing: { line: LINE, after: PARAGRAPH_GAP },
-			children: [new TextRun({ text, size: BODY_SIZE, color: INK, rightToLeft: isRtl })],
+			// A segment can carry newlines -- the inline editor accepts them, and word_timestamps
+			// output wraps. One TextRun renders them as nothing at all, silently joining the lines
+			// into one; `grep -c '<w:br' document.xml` was 0 for every export. A run per line with
+			// an explicit break between is how docx represents a soft return.
+			children: text.split('\n').flatMap((line, index) => [
+				...(index > 0 ? [new TextRun({ break: 1 })] : []),
+				new TextRun({ text: line, size: BODY_SIZE, color: INK, rightToLeft: isRtl }),
+			]),
 		})
 
 	const heading = (text: string) =>
@@ -67,7 +74,7 @@ export async function toDocx(title: string, segments: Segment[], direction: 'rtl
 		const metadata = [
 			// Always the left-to-right form: the right-to-left embedding the view uses would turn
 			// "00:00 --> 00:07" into "00:07 <-- 00:00" once Word resolves the line.
-			showTimestamps ? formatDuration(segment.start, segment.stop, 'ltr') : '',
+			showTimestamps ? formatDuration(segment.start, segment.stop, 'ltr', true) : '',
 			showSpeakers && segment.speaker != null ? speakerName(segment.speaker, speakerLabel, options.speakerNames) : '',
 		]
 			.filter(Boolean)

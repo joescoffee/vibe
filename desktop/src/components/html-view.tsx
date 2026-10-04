@@ -9,9 +9,15 @@ interface HTMLViewProps {
 	preference: Preference
 }
 
-export function formatDuration(start: number, stop: number, direction: 'rtl' | 'ltr' = 'ltr') {
-	const startFmt = formatTimestamp(start, false, '', false)
-	const stopFmt = formatTimestamp(stop, false, '', false)
+/**
+ * `includeMilliseconds` is opt-in because the on-screen view and the HTML export are read, not
+ * indexed, and `mm:ss` is the right density there. DOCX asks for it: without the fraction two
+ * different segments inside the same second print an identical range, which reads as a duplicated
+ * paragraph rather than as two things that were said.
+ */
+export function formatDuration(start: number, stop: number, direction: 'rtl' | 'ltr' = 'ltr', includeMilliseconds = false) {
+	const startFmt = formatTimestamp(start, false, '.', includeMilliseconds)
+	const stopFmt = formatTimestamp(stop, false, '.', includeMilliseconds)
 	const duration = `${startFmt} --> ${stopFmt}`
 
 	if (direction === 'rtl') {

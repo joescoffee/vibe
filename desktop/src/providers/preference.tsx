@@ -191,7 +191,13 @@ export const DEFAULT_MODEL_OPTIONS: ModelOptions = {
 	beam_size: 5,
 }
 
-const defaultOptions = {
+/**
+ * Exported so a reset restates nothing. The "Reset audio processing" action used to carry its own
+ * literal `normalize_loudness: false`, written when that was the default; `ba6fd9c5` flipped the
+ * default to true to protect the transcript and did not touch it, so pressing Reset turned the
+ * guard off. One source or it drifts again.
+ */
+export const defaultOptions = {
 	soundOnFinish: true,
 	focusOnFinish: true,
 	modelPath: null,
@@ -268,7 +274,12 @@ export function PreferenceProvider({ children }: { children: ReactNode }) {
 	// 64/33 with the turn-taking matching the content. buildSharedOptions drops it silently
 	// when the 147 MB model has not been fetched yet, so this default cannot break a fresh
 	// install -- it just does nothing until the model is there.
-	const [diarizeEnabled, setDiarizeEnabled] = usePersisted<boolean>(CONFIG_KEYS.diarizeEnabled, true)
+	// Default false, not true. The 147 MB Sortformer model is only fetched by `toggleDiarization`,
+	// which writes this key, so an unset key means the file is absent -- and the old default made
+	// the switch read ON on every fresh install while the request silently omitted `diarize_model`
+	// and the transcript came back with no speakers and no explanation. A switch that is on and
+	// does nothing is worse than one that is off and says what turning it on will cost.
+	const [diarizeEnabled, setDiarizeEnabled] = usePersisted<boolean>(CONFIG_KEYS.diarizeEnabled, false)
 	// Off. 50629adf turned this on believing it decoded each speech segment separately; it does
 	// not. Options::stable_timestamps() sets max_chunk_ms to u32::MAX (vad-rs lib.rs:53), which
 	// makes coalesce_bounded's merge test `end - start <= max` true for anything under 1193 hours,
