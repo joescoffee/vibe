@@ -34,6 +34,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = ROOT / "plans" / "improve"
 STATE = STATE_DIR / "state.json"
+LOCK = STATE_DIR / "night.lock"
+
+# Nothing stops two schedulers pointing at the same repo. I armed a launchd job and an in-session
+# cron at the same minute without noticing, and the only reason it would not have corrupted a
+# night is that `begin` happens to refuse a dirty tree -- which is luck, not a guard. Two runners
+# on one branch is the failure; this is the guard.
+STALE_LOCK_SECONDS = 8 * 3600
 
 # Two consecutive non-ACCEPT cycles stops the night. One is a bad fix; two in a row means the
 # agent is not converging, and a loop that keeps going in that state burns the night and leaves a
@@ -66,6 +73,32 @@ def refuse(reason: str) -> int:
     return 2
 
 
+def take_lock() -> str | None:
+    """Return a refusal reason, or None having taken the lock.
+
+    `O_EXCL` so the check and the take are one operation: a lock taken by reading first and
+    writing second is two runners agreeing they are alone.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    import os
+    import time
+    if LOCK.exists():
+        age = time.time() - LOCK.stat().st_mtime
+        if age < STALE_LOCK_SECONDS:
+            holder = LOCK.read_text(encoding="utf-8").strip()
+            return (f"another run holds {LOCK} ({holder}, {age / 60:.0f} min ago). "
+                    "Two runners on one branch is the thing this prevents. "
+                    f"Delete the lock if that run is dead.")
+        LOCK.unlink(missing_ok=True)
+    try:
+        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return f"another run took {LOCK} in the last instant"
+    with os.fdopen(fd, "w") as handle:
+        handle.write(f"pid {os.getpid()} at {datetime.now().isoformat(timespec='seconds')}\n")
+    return None
+
+
 def cmd_begin(args) -> int:
     state = load()
     tonight = datetime.now().strftime("%Y-%m-%d")
@@ -78,6 +111,10 @@ def cmd_begin(args) -> int:
     if dirty and not args.allow_dirty:
         return refuse("the working tree is dirty. An unattended run must start from a known state, "
                       f"or its revert cannot be trusted:\n{dirty[:400]}")
+
+    held = take_lock()
+    if held:
+        return refuse(held)
 
     branch = f"improve/{datetime.now().strftime('%m%d')}"
     current = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -173,6 +210,7 @@ def cmd_report(args) -> int:
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    LOCK.unlink(missing_ok=True)
     print(out)
     return 0
 
@@ -204,7 +242,28 @@ def self_test() -> int:
     failures += 0 if ok else 1
     print(f"   {'ok' if ok else 'MISMATCH'}  {FORBIDDEN_PATHS}")
 
-    print("5. a dirty tree is refused")
+    print("5. a second runner is refused while the first holds the lock")
+    import shutil, tempfile
+    global STATE_DIR, LOCK
+    keep_dir, keep_lock = STATE_DIR, LOCK
+    STATE_DIR = Path(tempfile.mkdtemp(prefix="night-lock-"))
+    LOCK = STATE_DIR / "night.lock"
+    try:
+        first = take_lock()
+        second = take_lock()
+        ok = first is None and second is not None and "another run holds" in second
+        failures += 0 if ok else 1
+        print(f"   {'ok' if ok else 'MISMATCH'}  first={first!r} second={'refused' if second else 'ALLOWED'}")
+        LOCK.unlink(missing_ok=True)
+        third = take_lock()
+        ok = third is None
+        failures += 0 if ok else 1
+        print(f"   {'ok' if ok else 'MISMATCH'}  released -> next runner allowed")
+    finally:
+        shutil.rmtree(STATE_DIR, ignore_errors=True)
+        STATE_DIR, LOCK = keep_dir, keep_lock
+
+    print("6. a dirty tree is refused")
     ok = refuse("probe") == 2
     failures += 0 if ok else 1
     print(f"   {'ok' if ok else 'MISMATCH'}  refuse() exits 2")
