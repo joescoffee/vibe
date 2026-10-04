@@ -155,10 +155,21 @@ $V doctor --run "$RUN" --expect-commit "$(git rev-parse --short=8 HEAD)" --proje
 The reason lands in `verdict.txt` as an `OVERRIDE` line and in `gate2.json`, so a reader sees what
 was waived and why instead of having to take the prose on trust.
 
-**Only `build.identity` can be waived.** Driving a knowingly stale build is a defensible call;
-everything else that fails means driving is either impossible or would write where it must not.
-`isolation.projects` in particular is the one check standing between a run and the user's real
-transcripts, and `--override` is refused outright when it is among the failures. `config_watcher.rs` reloads external edits live, so `config-set` redirects it
+**Only a `build.identity` that FAILED can be waived**, and nothing else. Driving a knowingly stale
+build is a defensible call. A `build.identity` that is **BLOCKED** is a different claim — it means
+there was no `COMMIT HASH` line at all, so you do not know *which* build you are driving, and no
+override will let that through. `isolation.projects` is the check standing between a run and the
+user's real transcripts; `--override` is refused outright when it is among the failures.
+
+`doctor` deletes `gate2.json` as its first act. `emit` is `sys.exit`, and six of them sit between
+the top of the function and `write_gate2` — so without that, a doctor that refused or could not run
+left the *previous* run's `PASS` on disk and `press` sailed straight through it. Proven by driving
+the CLI: the marker was byte-identical across a refused `--override`, and the next `press` got past
+the gate. A permission has to be re-earned; it is never inherited from a run that did not finish.
+
+An unreadable or truncated `gate2.json` is `BLOCKED`, not a traceback. An escaping `JSONDecodeError`
+exits 1, which this harness defines as FAIL — a *red* indistinguishable from a button press that
+genuinely failed. `config_watcher.rs` reloads external edits live, so `config-set` redirects it
 **without a relaunch** — which matters precisely because every relaunch destroys a day of logs.
 
 The `pgrep` pattern is anchored (`^…/vibe$`). Unanchored it also matches the `vibe-server` sidecar,

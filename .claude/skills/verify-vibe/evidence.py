@@ -138,14 +138,25 @@ def require_gate2(run: Path, command: str) -> None:
     if not marker.is_file():
         raise Blocked(f"{command} refused: gate 2 has not run for this run directory. "
                       f"Run `doctor` first.")
-    state = json.loads(marker.read_text(encoding="utf-8"))
+    try:
+        state = json.loads(marker.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        # Must be BLOCKED, not an uncaught traceback: an escaping exception exits 1,
+        # which this harness defines as FAIL -- a *red* the caller cannot distinguish
+        # from "the button was there and the press failed".
+        raise Blocked(f"{command} refused: {marker} is unreadable ({exc})")
     if state.get("verdict") == "PASS":
         return
     failing = [c["id"] for c in state.get("checks", []) if c["verdict"] != "PASS"]
+    waivable = {c["id"] for c in state.get("checks", [])
+                if c["verdict"] == "FAIL" and c["id"] in OVERRIDABLE_CHECKS}
     override = state.get("override")
-    if override and set(failing) <= OVERRIDABLE_CHECKS:
+    if override and set(failing) <= waivable:
         return
-    unwaivable = sorted(set(failing) - OVERRIDABLE_CHECKS)
+    # Computed from the SAME set the decision uses. Deriving the advice from
+    # OVERRIDABLE_CHECKS instead told the reader to re-run with --override for a
+    # BLOCKED build.identity, which no override will ever let through.
+    unwaivable = sorted(set(failing) - waivable)
     advice = (f"{unwaivable} cannot be waived." if unwaivable else
               "Re-run `doctor --override '<reason>'` to proceed on the record.")
     raise Blocked(f"{command} refused: gate 2 is {state.get('verdict')} on {sorted(failing)}. {advice}")

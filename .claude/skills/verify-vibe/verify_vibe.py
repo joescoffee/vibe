@@ -178,6 +178,13 @@ def cmd_launch(args) -> None:
 def cmd_doctor(args) -> None:
     """Gate 2. Seven read-only checks. Any BLOCKED makes the whole gate BLOCKED."""
     run = Path(args.run).resolve()
+    # Invalidate first. `emit` is sys.exit, and six of them sit between here and
+    # write_gate2 -- so without this, a doctor that refuses or cannot run leaves the
+    # PREVIOUS run's PASS on disk and `press` sails through it. That was a real hole,
+    # proven by driving the CLI: marker byte-identical across a refused --override,
+    # and the next press got past the gate. A permission must be re-earned, never
+    # inherited from a run that did not finish.
+    (run / "gate2.json").unlink(missing_ok=True)
     checks: list[tuple[str, str, str]] = []  # (verdict, id, detail)
 
     trusted = osascript(_AX_TRUSTED, [], run, "doctor-ax")
