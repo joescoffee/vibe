@@ -146,6 +146,12 @@ export default function MeetingPromptWindow() {
 			setState(null)
 		} catch (error) {
 			console.error('Failed to dismiss meeting prompt:', error)
+		} finally {
+			// Only the error path used to reset this. The window is created once and hidden, never
+			// destroyed, so React state survives a dismissal -- one successful dismiss left `busy`
+			// true forever and every later prompt rendered with both buttons disabled. The
+			// recording path resets via the `meeting-prompt-recording-result` listener above; this
+			// path has no such event, so it has to reset itself.
 			setBusy(false)
 		}
 	}

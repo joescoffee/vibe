@@ -76,10 +76,15 @@ export function useRecording(onBeforeStart: () => void) {
 		try {
 			await emit('stop_record')
 		} catch (error) {
-			stopKeepAwake(KEEP_AWAKE.record)
 			setIsRecording(false)
 			console.error('stopRecord error: ', error)
 			setErrorModal?.({ log: String(error), open: true })
+		} finally {
+			// The hold taken in startRecord used to be released only on the two error paths, so a
+			// recording that succeeded left the display awake and the machine unable to sleep for
+			// the rest of the app's lifetime. Releasing a name that is not held is a no-op, which
+			// is what makes a `finally` the right shape here.
+			stopKeepAwake(KEEP_AWAKE.record)
 		}
 	}
 
