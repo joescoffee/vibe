@@ -217,6 +217,20 @@ task i18n {
     pnpm i18n:generate
 }
 
+# Measure saved transcripts for the one engine failure this repo has suffered:
+# whisper answering undecodable audio with training-data boilerplate, then looping on it.
+#
+# Deliberately NOT in `ci`. It measures *saved transcripts*, and the only corpus is the
+# user's own projects folder -- there are no audio fixtures in the repo to run the engine
+# over, so there is nothing for CI to check. Making this a real gate needs committed
+# fixtures and a sidecar run; the measure is ready for that, the fixtures are not.
+#
+# `--self-test` proves the measure still separates the two populations and is the part
+# worth wiring anywhere: it fails if the threshold is moved out of the observed gap.
+task transcript-quality {
+    uv run scripts/transcript_quality.py ~/Documents/Vibe
+}
+
 # Check translation coverage against en-US.
 task check-i18n {
     uv run scripts/check_i18n.py
