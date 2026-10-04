@@ -68,7 +68,10 @@ optimises for speed and the app for size — the root sets `opt-level = "s"`, `l
 Consequences worth knowing before you go looking for a lint failure:
 
 - `cargo clippy` from the root covers only `desktop/src-tauri` and `crates/meeting-detect`.
-  `server/`, `handoff/wasm` and `handoff/probe` are outside it and are never linted by CI.
+  `server/`, `handoff/wasm` and `handoff/probe` are outside it. `server/` has `server-tests.yml`
+  and the two handoff crates have `handoff.yml`; `chore check-handoff` runs the latter locally.
+  Until those existed nothing mechanical touched the handoff code, and a review found two defects
+  there.
 - `server/` has its own `chorefile`, so `chore list` there shows a different task set.
 - `server/` needs `chore fetch-libs` before it will build at all.
 
@@ -97,9 +100,28 @@ unreachable for exactly this reason).
 
 `.server-version` still says `v0.6.10`, and `chore setup` still knows how to fetch that release,
 but the binary staged in `desktop/src-tauri/binaries/` is built from `server/` in this repo. It
-carries a patch to `whisper-rs`'s rolling text context that upstream does not have: a window whose
-words merely repeat the history no longer extends it, which is what stops a hallucination over a
-silent opening from conditioning the rest of a long file into the same repeated line.
+carries two changes upstream does not have:
+
+- a patch to `whisper-rs`'s rolling text context — a window whose words merely repeat the history
+  no longer extends it, which is what stops a hallucination over a silent opening from
+  conditioning the rest of a long file into the same repeated line;
+- an `Origin` guard on the HTTP server, which refuses any request a browser sent. `POST
+  /v1/audio/transcriptions` is multipart, therefore a CORS simple request, therefore not
+  preflighted: without it any web page the user had open could make the machine transcribe audio
+  of the attacker's choosing.
+
+`binaries/` is gitignored, so neither change is in the repository as a binary. Both are in
+`server/`, and the staged file is proved to carry them by its own strings:
+
+```bash
+strings desktop/src-tauri/binaries/vibe-server-aarch64-apple-darwin |
+  grep -c 'window repeated the rolling context'   # 1
+strings desktop/src-tauri/binaries/vibe-server-aarch64-apple-darwin |
+  grep -c 'refusing a cross-origin request'       # 1
+```
+
+Run those two before trusting a build. A `0` means the staged binary predates the change, which is
+what `chore setup` silently restores.
 
 So `.server-version` describes the *baseline*, not what ships. To rebuild after touching `server/`:
 
@@ -189,6 +211,7 @@ Three workflows run on pull requests, split so a change pays only for what it to
 | `lint_rust.yml` | `desktop/src-tauri/**`, `crates/**`, root `Cargo.*` | `cargo fmt`, `clippy -D warnings`, `cargo test --all` |
 | `ci.yml` | `desktop/src/**`, `i18n/**`, `website/**`, `scripts/**`, `chorefile` | eslint, `chore check-types`, `chore check-i18n`, `chore test` |
 | `server-tests.yml` | `server/**` | `chore fetch-libs`, then `cargo test --all` in that workspace |
+| `handoff.yml` | `handoff/**` | `fmt`, `clippy -D warnings` and tests for `handoff/wasm`, the same for `handoff/probe`, and the PWA's pairing tests |
 
 Together they cover every task in `chore ci`. `ci.yml` runs the tasks individually rather than
 calling `chore ci`, because that task's `lint` also shells out to cargo — which belongs to

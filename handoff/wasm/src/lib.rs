@@ -33,6 +33,14 @@ const UPLOAD_CHUNK: usize = 256 * 1024;
 /// Read buffer for response lines.
 const READ_CHUNK: usize = 8192;
 
+/// Longest single NDJSON event line this client will buffer from the desktop.
+///
+/// Every outbound length in this file is bounded; the inbound buffer was not, so a QR pointing at
+/// a hostile iroh endpoint could answer with bytes and no newline and grow this `Vec` until the
+/// phone's tab died. A transcript event carrying a long segment list is the largest legitimate
+/// line, and 4 MiB is far above any of them -- the desktop emits one event per segment.
+const MAX_EVENT_LINE: usize = 4 * 1024 * 1024;
+
 #[wasm_bindgen(start)]
 fn start() {
     console_error_panic_hook::set_once();
@@ -132,6 +140,10 @@ impl HandoffClient {
     /// `{"type":"uploadProgress","sent":n,"total":n}` events while uploading.
     /// Transport failures surface as
     /// `{"type":"error","code":"transport","message":"..."}`.
+    // A `#[wasm_bindgen]` export: the arguments are the JS call signature. Grouping them into a
+    // struct would mean a `JsValue` to deserialize on this side and an object literal on the
+    // other, which is more surface, not less.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_recording(
         &self,
         endpoint_id: String,
@@ -296,7 +308,13 @@ impl<'a> Lines<'a> {
             }
             match self.recv.read(&mut chunk).await.context("failed to read")? {
                 Some(0) | None => self.eof = true,
-                Some(n) => self.buf.extend_from_slice(&chunk[..n]),
+                Some(n) => {
+                    anyhow::ensure!(
+                        self.buf.len() + n <= MAX_EVENT_LINE,
+                        "event line exceeds {MAX_EVENT_LINE} bytes without a newline"
+                    );
+                    self.buf.extend_from_slice(&chunk[..n]);
+                }
             }
         }
     }
@@ -335,4 +353,33 @@ fn to_js<T: Serialize>(value: &T) -> Result<JsValue> {
 fn into_js_readable_stream<T: Serialize>(stream: impl Stream<Item = T> + 'static) -> JsReadableStream {
     let stream = stream.map(|event| Ok(to_js(&event).unwrap()));
     ReadableStream::from_stream(stream).into_raw()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_line, MAX_AUDIO_LEN, MAX_EVENT_LINE, MAX_HEADER_LEN};
+
+    /// The point of the bound is that it is finite and reachable from a hostile peer.
+    ///
+    /// `next_line` itself needs an iroh stream to drive, which a unit test has no way to make, so
+    /// what is asserted here is the arithmetic the `ensure!` performs and that the constant sits
+    /// where the other two bounds in this file sit: above every legitimate value and far below
+    /// "until the tab dies", which is what the inbound buffer used to allow.
+    #[test]
+    fn the_inbound_bound_is_finite_and_in_proportion() {
+        assert!(MAX_EVENT_LINE > MAX_HEADER_LEN, "an event line may be longer than a header");
+        assert!(MAX_EVENT_LINE < MAX_AUDIO_LEN, "but not audio-sized -- events are JSON");
+
+        // The accumulation `next_line` guards: buffered + chunk must stay inside the bound.
+        let buffered = MAX_EVENT_LINE - 1;
+        assert!(buffered + 1 <= MAX_EVENT_LINE);
+        assert!(buffered + 2 > MAX_EVENT_LINE, "one byte past the bound must be refused");
+    }
+
+    #[test]
+    fn a_malformed_line_is_skipped_rather_than_buffered_forever() {
+        assert!(parse_line(b"not json").is_none());
+        assert!(parse_line(b"").is_none());
+        assert_eq!(parse_line(br#"{"type":"done"}"#).unwrap()["type"], "done");
+    }
 }

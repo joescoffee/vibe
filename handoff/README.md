@@ -53,6 +53,24 @@ returns the same device, making a lost response recoverable. A consumed invitati
 cannot enroll another credential. A revoked credential cannot retry enrollment
 without a new invitation.
 
+### The device credential shares an origin with every other page on that host
+
+`localStorage` is partitioned by origin, not by path. The default deployment is
+`https://thewh1teagle.github.io/vibe/phone/`, so every GitHub Pages project
+published under that account can read `vibe.handoff.peer` — and with it the
+device token that authorizes transcription on the paired desktop.
+
+Nothing in the PWA can prevent that; it is a property of where the app is
+hosted. Serving it from an origin of its own is the remedy, and
+`VIBE_PWA_ORIGIN` already allows that at build time and at run time (see
+`desktop/src-tauri/src/handoff/mod.rs`). Anyone deploying this for real should
+set it.
+
+What is already in place keeps the exposure bounded rather than removing it: the
+credential is revocable from Phone settings, it is stored hashed on the desktop,
+and the invitation that minted it cannot itself authorize transcription and
+rotates after each pairing.
+
 For the native probe, add `--pair` when supplying an invitation. It enrolls a
 visible “Handoff probe” device, which can be revoked from Phone settings. Optionally
 pass `--device-token` with a random 32-hex credential to reuse it later through

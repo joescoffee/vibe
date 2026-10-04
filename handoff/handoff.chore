@@ -110,3 +110,25 @@ task phone-caps url {
     cd handoff/probe
     cargo run --quiet -- --pair --url $1 --capabilities
 }
+
+# Lint and test the handoff pieces.
+#
+# `handoff/wasm` and `handoff/probe` each carry an empty `[workspace]` table so
+# the desktop build never compiles them -- which also puts them outside `cargo
+# clippy` from the root, and outside `lint_rust.yml`. The deep review found two
+# defects in these files and noted that nothing mechanical would ever have: an
+# unbounded inbound buffer in a file where every outbound length is bounded, and
+# a credential on a path-shared origin. This is the job that reaches them.
+task check-handoff {
+    cd handoff/wasm
+    cargo fmt --check
+    cargo clippy --all-targets -- -D warnings
+    cargo test
+
+    cd $ROOT/handoff/probe
+    cargo fmt --check
+    cargo clippy --all-targets -- -D warnings
+
+    cd $ROOT
+    node --test handoff/pwa/tests/pairing.test.mjs
+}

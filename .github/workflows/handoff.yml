@@ -1,0 +1,58 @@
+name: Check Handoff
+
+# `handoff/wasm` and `handoff/probe` each carry an empty `[workspace]` table so
+# the desktop build never compiles them. That also puts them outside `cargo
+# clippy` from the root and outside `lint_rust.yml`, and the PWA is outside
+# `ci.yml`: until this workflow existed, nothing mechanical touched any of the
+# three. The deep review of 2026-10-04 found two defects in these files and
+# observed exactly that.
+
+on:
+    pull_request:
+        paths:
+            - 'handoff/**'
+            - '.github/workflows/handoff.yml'
+    workflow_dispatch:
+
+env:
+    RUST_BACKTRACE: 1
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy, rustfmt
+
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: |
+                      handoff/wasm
+                      handoff/probe
+
+            - name: wasm client
+              working-directory: handoff/wasm
+              run: |
+                  cargo fmt --check
+                  cargo clippy --all-targets -- -D warnings
+                  cargo test
+
+            - name: probe
+              working-directory: handoff/probe
+              run: |
+                  cargo fmt --check
+                  cargo clippy --all-targets -- -D warnings
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+
+            - name: pwa pairing tests
+              run: node --test handoff/pwa/tests/pairing.test.mjs

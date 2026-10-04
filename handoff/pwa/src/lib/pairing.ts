@@ -1,4 +1,22 @@
-/** Durable phone credentials, including retries after a lost pairing response. */
+/**
+ * Durable phone credentials, including retries after a lost pairing response.
+ *
+ * Stored in `localStorage`, which is partitioned by **origin and not by path**. The default
+ * deployment is `https://thewh1teagle.github.io/vibe/phone/`, so every other GitHub Pages project
+ * published under that same account shares this storage: a page at
+ * `thewh1teagle.github.io/anything-else/` can read this key, and with it the device token that
+ * authorizes transcription on the paired desktop.
+ *
+ * Nothing in this file can fix that -- it is a property of where the PWA is hosted, and the only
+ * real remedy is serving it from an origin of its own, which `VIBE_PWA_ORIGIN` already allows at
+ * build and run time (`desktop/src-tauri/src/handoff/mod.rs`). What is in reach from here is
+ * keeping the exposure bounded, which is why `clearPeer` exists and why the desktop can revoke a
+ * device: a leaked token is revocable, and the invitation that minted it cannot itself authorize
+ * transcription and rotates after each pairing.
+ *
+ * Do not add anything else to this key. In particular never the invitation secret from the QR
+ * fragment beyond the single confirmation round trip it already needs.
+ */
 export const PEER_KEY = 'vibe.handoff.peer'
 
 export interface Peer {
