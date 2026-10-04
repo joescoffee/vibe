@@ -84,16 +84,6 @@
       "human_decides": "when to cut a server release carrying both patches"
     },
     {
-      "id": "unpushed",
-      "title": "Commits on main that nobody else can see",
-      "found": "git rev-list @{u}..HEAD",
-      "detail": "The evaluator prints this count in its identity line on every run, so it cannot drift unnoticed.",
-      "class": "release",
-      "routes_to": "opening-a-pr.md",
-      "needs_human": true,
-      "human_decides": "whether to push"
-    },
-    {
       "id": "tcc-probe-artifact",
       "title": "A test project of mine is sitting in the user's transcripts folder",
       "found": "2026-10-02",
