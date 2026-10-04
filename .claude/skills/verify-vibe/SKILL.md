@@ -169,8 +169,17 @@ the gate. A permission has to be re-earned; it is never inherited from a run tha
 
 An unreadable or truncated `gate2.json` is `BLOCKED`, not a traceback. An escaping `JSONDecodeError`
 exits 1, which this harness defines as FAIL — a *red* indistinguishable from a button press that
-genuinely failed. `config_watcher.rs` reloads external edits live, so `config-set` redirects it
-**without a relaunch** — which matters precisely because every relaunch destroys a day of logs.
+genuinely failed.
+
+**The marker is bound to the session and the config it described.** `write_gate2` stamps the pid,
+the launch timestamp and the `transcription.projectsPath` doctor actually saw; `require_gate2`
+re-checks all three. Without that it is a past-tense assertion presented as a present-tense
+permission: a second `launch` in the same run directory inherits the first session's `PASS`, and a
+`config-set` afterwards moves the projects path with nothing re-checking it. That second case is not
+hypothetical — `config_watcher.rs` reloads external edits live, so redirecting the path **without a
+relaunch** is a supported move, and the whole reason to prefer it is that every relaunch destroys a
+day of logs. A marker written before these fields existed carries no opinion about them and is
+accepted; the check uses `in`, not a `.get()` that would read a missing key as `None`.
 
 The `pgrep` pattern is anchored (`^…/vibe$`). Unanchored it also matches the `vibe-server` sidecar,
 which made `process.ours` report "more than one vibe running" on a perfectly normal launch.

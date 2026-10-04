@@ -117,12 +117,27 @@ OVERRIDABLE_CHECKS = frozenset({"build.identity"})
 
 
 def write_gate2(run: Path, verdict: str, checks: list, override: dict | None) -> Path:
-    """Record gate 2's outcome where the driving commands can find it."""
+    """Record gate 2's outcome, bound to the session and config it actually described.
+
+    The pid, launch timestamp and projects path are not decoration. Without them the
+    marker is a past-tense assertion presented as a present-tense permission: a second
+    `launch` in the same run directory inherits the first session's PASS, and a
+    `config-set` afterwards moves `projectsPath` with nothing re-checking it --
+    `config_watcher.rs` reloads the file live, so that is a supported move, not a
+    hypothetical one.
+    """
     path = run / "gate2.json"
+    try:
+        projects = read_config().get("transcription.projectsPath")
+    except Blocked:
+        projects = None
     path.write_text(json.dumps({
         "verdict": verdict,
         "checks": [{"verdict": v, "id": i, "detail": d} for v, i, d in checks],
         "override": override,
+        "pid": (run / "vibe.pid").read_text().strip() if (run / "vibe.pid").is_file() else None,
+        "launch_start": launch_start(run),
+        "projects_path": projects,
         "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -146,6 +161,26 @@ def require_gate2(run: Path, command: str) -> None:
         # which this harness defines as FAIL -- a *red* the caller cannot distinguish
         # from "the button was there and the press failed".
         raise Blocked(f"{command} refused: {marker} is unreadable ({exc})")
+    # The marker describes one session and one config. Anything that moved since has to
+    # re-earn the permission, or the gate is asserting something it never checked.
+    pid_now = (run / "vibe.pid").read_text().strip() if (run / "vibe.pid").is_file() else None
+    if state.get("pid") is not None and state.get("pid") != pid_now:
+        raise Blocked(f"{command} refused: gate 2 was recorded for pid {state['pid']}, "
+                      f"this run directory now holds pid {pid_now}. Re-run `doctor`.")
+    if state.get("launch_start") is not None and state.get("launch_start") != launch_start(run):
+        raise Blocked(f"{command} refused: the app was relaunched since gate 2 ran. Re-run `doctor`.")
+    try:
+        projects_now = read_config().get("transcription.projectsPath")
+    except Blocked:
+        projects_now = None
+    # `in`, not `.get()`: a marker written before this field existed has no opinion about
+    # the projects path, and must not be read as asserting None. Enforcing it on those
+    # would refuse a drive that is already in flight.
+    if "projects_path" in state and state["projects_path"] != projects_now:
+        raise Blocked(f"{command} refused: transcription.projectsPath moved from "
+                      f"{state.get('projects_path')!r} to {projects_now!r} since gate 2 ran. "
+                      "Isolation is the one check that must never be stale. Re-run `doctor`.")
+
     if state.get("verdict") == "PASS":
         return
     failing = [c["id"] for c in state.get("checks", []) if c["verdict"] != "PASS"]
