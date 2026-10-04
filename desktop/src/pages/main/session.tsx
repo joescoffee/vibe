@@ -156,6 +156,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
 	// A recording becomes a durable project first. Transcription is an optional second step which
 	// updates that same project, so a failed/disabled transcription never costs the user the audio.
+	//
+	// This save is deliberately NOT gated on `saveTranscripts`, unlike the other two call sites
+	// (use-transcribe-queue.ts and handoff-transcript-saver.tsx). The switch reads "Keep transcripts
+	// and media in the projects folder", so the exemption looks wrong at a glance and has been filed
+	// as a privacy gap once already. It is not: `cmd/audio.rs` writes the recording into
+	// `get_vibe_temp_folder()`, and `cleaner.rs` globs `$TMPDIR/vibe_temp*` and deletes it from
+	// `setup.rs` on the next launch. This save is what rescues the audio from temp. Gating it would
+	// mean switching the preference off silently destroys every recording -- which is why the
+	// transcript written here carries `segments: []`: the audio is saved, the transcript is not.
 	useEffect(() => {
 		const unlisten: Promise<UnlistenFn> = listen<{ path: string; name: string; warning?: string }>('record_finish', async ({ payload }) => {
 			if (hotkeyRecordingActive) return
