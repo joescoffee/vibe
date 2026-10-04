@@ -310,7 +310,7 @@ impl<'a> Lines<'a> {
                 Some(0) | None => self.eof = true,
                 Some(n) => {
                     anyhow::ensure!(
-                        self.buf.len() + n <= MAX_EVENT_LINE,
+                        fits_in_event_line(self.buf.len(), n),
                         "event line exceeds {MAX_EVENT_LINE} bytes without a newline"
                     );
                     self.buf.extend_from_slice(&chunk[..n]);
@@ -318,6 +318,15 @@ impl<'a> Lines<'a> {
             }
         }
     }
+}
+
+/// Whether `incoming` more bytes may join `buffered` already held for one unterminated line.
+///
+/// A free function so it can be exercised: the bound guards an iroh stream a unit test cannot
+/// make, and asserting things about the constant itself proves nothing a compiler did not
+/// already know. `checked_add` because the sum is attacker-influenced in principle.
+fn fits_in_event_line(buffered: usize, incoming: usize) -> bool {
+    buffered.checked_add(incoming).is_some_and(|total| total <= MAX_EVENT_LINE)
 }
 
 fn parse_line(line: &[u8]) -> Option<Value> {
@@ -357,23 +366,33 @@ fn into_js_readable_stream<T: Serialize>(stream: impl Stream<Item = T> + 'static
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_line, MAX_AUDIO_LEN, MAX_EVENT_LINE, MAX_HEADER_LEN};
+    use super::{fits_in_event_line, parse_line, MAX_EVENT_LINE, MAX_HEADER_LEN, READ_CHUNK};
 
-    /// The point of the bound is that it is finite and reachable from a hostile peer.
-    ///
-    /// `next_line` itself needs an iroh stream to drive, which a unit test has no way to make, so
-    /// what is asserted here is the arithmetic the `ensure!` performs and that the constant sits
-    /// where the other two bounds in this file sit: above every legitimate value and far below
-    /// "until the tab dies", which is what the inbound buffer used to allow.
+    /// The accumulation `next_line` guards, exercised rather than asserted about.
     #[test]
-    fn the_inbound_bound_is_finite_and_in_proportion() {
-        assert!(MAX_EVENT_LINE > MAX_HEADER_LEN, "an event line may be longer than a header");
-        assert!(MAX_EVENT_LINE < MAX_AUDIO_LEN, "but not audio-sized -- events are JSON");
+    fn the_inbound_bound_refuses_one_byte_past_itself() {
+        assert!(fits_in_event_line(0, 1));
+        assert!(fits_in_event_line(MAX_EVENT_LINE - 1, 1));
+        assert!(!fits_in_event_line(MAX_EVENT_LINE, 1));
+        assert!(!fits_in_event_line(MAX_EVENT_LINE - 1, 2));
+        // The hostile shape: bytes arriving forever with no newline. Before the bound existed
+        // this `Vec` simply grew until the phone's tab died.
+        let mut buffered = 0usize;
+        let mut chunks = 0u64;
+        while fits_in_event_line(buffered, READ_CHUNK) {
+            buffered += READ_CHUNK;
+            chunks += 1;
+            assert!(chunks < 10_000, "the loop is unbounded, which is the defect");
+        }
+        assert!(buffered > MAX_HEADER_LEN, "a legitimate event line must still fit");
+        assert!(buffered <= MAX_EVENT_LINE);
+    }
 
-        // The accumulation `next_line` guards: buffered + chunk must stay inside the bound.
-        let buffered = MAX_EVENT_LINE - 1;
-        assert!(buffered + 1 <= MAX_EVENT_LINE);
-        assert!(buffered + 2 > MAX_EVENT_LINE, "one byte past the bound must be refused");
+    /// Overflow cannot be used to get past it.
+    #[test]
+    fn a_saturating_sum_does_not_wrap_into_acceptance() {
+        assert!(!fits_in_event_line(usize::MAX, 1));
+        assert!(!fits_in_event_line(usize::MAX - 1, 2));
     }
 
     #[test]
