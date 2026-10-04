@@ -263,5 +263,10 @@ The rest of the playbooks have no such precondition and are fine.
 
 Separately, `cmd/skill.rs` lets the *app* install a skill into the user's home
 (`~/.claude/skills/vibe/SKILL.md` or `~/.codex/…`), composed in `desktop/src/lib/skill.ts` from the
-sidecar's `/skill` endpoint. That path deliberately bypasses the fs plugin scope, and its body is
-whatever `api.baseUrl` served — worth knowing before changing either end.
+sidecar's `/skill` endpoint. That path deliberately bypasses the fs plugin scope.
+
+This file used to say the body was "whatever `api.baseUrl` served", which described an attack that
+does not exist. The URL comes from `get_api_base_url`, which returns `process.base_url()` — the
+port of the live child process — and never reads the config key. A local process editing
+`app_config.json` cannot redirect the skill install. `api.baseUrl` is written *out* for agents to
+read; nothing in the app reads it back.

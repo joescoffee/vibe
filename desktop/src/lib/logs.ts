@@ -54,14 +54,14 @@ export async function collectLogs() {
 		const logs: string = await invoke<string>('get_logs')
 		const filteredLogs = logs
 			.split('\n')
-			.filter((l) => l.toLowerCase().includes('error')) // Filter lines with "debug"
-			.slice(-10) // Take the last 3 lines
+			.filter((line) => line.toLowerCase().includes('error'))
+			.slice(-10)
+			// Each log line is a JSON record; the readable part is `fields.message`.
 			.map((line) => {
 				try {
-					const parsed = JSON.parse(line) // Deserialize JSON
-					return parsed?.fields?.message || 'No message found' // Extract .message or fallback
-				} catch (e) {
-					return 'Invalid JSON' // Handle invalid JSON
+					return (JSON.parse(line)?.fields?.message as string | undefined) || 'No message found'
+				} catch {
+					return 'Invalid JSON'
 				}
 			})
 			.join('\n')

@@ -28,7 +28,7 @@ unverifiable beats letting a neighbouring check stand in for it.
 | Entry point | Why it cannot be driven |
 |---|---|
 | Drag-and-drop onto the window (`use-drop-target.ts`) | `NSDraggingDestination`; AX cannot synthesize a drag |
-| `open -b github.com.thewh1teagle.vibe <file>` | Dead code — `useDeepLinks`/`useSingleInstance` call `setFiles()` on `FilesProvider`, but its only consumers are under `pages/home/`, and `app.tsx` routes only `/` → `pages/main` and `/setup`. `pages/home` is unreachable. Worth filing separately; it also contradicts what `CLAUDE.md` says about deep links. |
+| `open -b github.com.thewh1teagle.vibe <file>` | Dead code — `useDeepLinks`/`useSingleInstance` call `setFiles()` on `FilesProvider`, and **nothing reachable reads it back**. The earlier wording here said `pages/home` is unreachable; that is not true. An import-graph walk from `main.tsx` (192 files, dynamic `import()` included) reaches 2 of the 7 files under `pages/home/`, and one of them, `use-recording.ts`, is imported by the live `pages/main/session.tsx`. The correct statement is narrower and stronger: the one reachable `useFilesContext` consumer is `use-audio-download.ts:28`, which destructures `setFiles` only. The `files` state is write-only in all reachable code. Worth filing separately; it also contradicts what `CLAUDE.md` says about deep links. |
 
 ## Not yet mapped
 

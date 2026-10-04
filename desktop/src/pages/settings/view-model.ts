@@ -43,36 +43,13 @@ async function openModelsUrl() {
 }
 
 async function reportIssue() {
+	// `collectLogs` already appends the <details> log block. This function used to build and
+	// append a second, identical one, so every report carried the excerpt twice.
 	try {
-		let info = await collectLogs()
-
-		const logs: string = await invoke<string>('get_logs')
-		const filteredLogs = logs
-			.split('\n')
-			.filter((l) => l.toLowerCase().includes('error')) // Filter lines with "debug"
-			.slice(-10) // Take the last 3 lines
-			.map((line) => {
-				try {
-					const parsed = JSON.parse(line) // Deserialize JSON
-					return parsed?.fields?.message || 'No message found' // Extract .message or fallback
-				} catch (e) {
-					return 'Invalid JSON' // Handle invalid JSON
-				}
-			})
-			.join('\n')
-		const templatedLogs = `<details>
-<summary>logs</summary>
-
-\`\`\`console
-${filteredLogs}
-\`\`\`
-</details>
-`
-		info += `\n\n\n${templatedLogs}`
-		openUrl(await getIssueUrl(info))
-	} catch (e) {
-		console.error(e)
-		openUrl(await getIssueUrl(`Couldn't get info ${e}`))
+		openUrl(await getIssueUrl(await collectLogs()))
+	} catch (error) {
+		console.error(error)
+		openUrl(await getIssueUrl(`Couldn't get info ${error}`))
 	}
 }
 
