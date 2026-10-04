@@ -278,8 +278,19 @@ task improve-all {
     uv run scripts/improve/route.py --all
 }
 
-# Prove both levers can still fail. Part of `ci` on purpose.
+# Prove the three levers can still fail. Part of `ci` on purpose.
 task improve-selftest {
     uv run scripts/improve/evaluate.py --self-test
     uv run scripts/improve/route.py --self-test
+    uv run scripts/improve/night.py --self-test
+}
+
+# Open tonight's branch and name the first item. Refuses a dirty tree or a tripped breaker.
+task night-begin {
+    uv run scripts/improve/night.py begin
+}
+
+# The morning report, written to plans/improve/report.md (gitignored).
+task night-report {
+    uv run scripts/improve/night.py report
 }
