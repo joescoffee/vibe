@@ -257,9 +257,10 @@ Both levers self-test inside `chore ci` (`chore improve-selftest`). `evaluate.py
 proves all three verdicts are reachable; `route.py --self-test` proves a banned or missing playbook
 route is refused. A lever nobody checks is a lever that rots.
 
-Nightly is opt-in. `scripts/improve/com.vibe.improve.plist` is the durable schedule and is not
-loaded; arming it lets an agent edit this repo unattended, under the rules in `night.py` — branch
-only, revert on a failed gate, stop after two cycles without an ACCEPT, never push.
+Nightly is opt-in: `scripts/improve/install-nightly.sh` arms it, `--remove` disarms it. Arming it
+lets an agent edit this repo unattended, under the rules in `night.py` — branch only, revert on a
+failed gate, stop after two cycles without an ACCEPT, never push. The plist is a template with no
+username or absolute path in it, so it is safe here and works in any clone.
 
 `/autofix` is the same shape and its machinery lives in `~/Downloads/ucamp-poc/scripts/autofix/`,
 not here. Its loop driver fits and `night.sh` follows it; its `evaluate.sh` runs `npm run build`

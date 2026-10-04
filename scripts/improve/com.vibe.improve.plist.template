@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The durable nightly schedule. Not installed by default: loading it lets an agent edit this
-  repository while nobody is watching, which is the user's call to make, not a side effect of
-  cloning. `scripts/improve/night.py` holds the rules it runs under.
+  Template for the durable nightly schedule. `install-nightly.sh` substitutes __ROOT__,
+  __HOME__, __CLAUDE__ and __CLAUDE_DIR__ from the checkout it is run in, so nothing here is
+  tied to one machine or one user.
 
-    cp scripts/improve/com.vibe.improve.plist ~/Library/LaunchAgents/
-    launchctl load -w ~/Library/LaunchAgents/com.vibe.improve.plist
+  Not installed by default: loading it lets an agent edit this repository while nobody is
+  watching, which is the user's call to make, not a side effect of cloning.
+  `scripts/improve/night.py` holds the rules it runs under.
+
+    scripts/improve/install-nightly.sh          # fills this in and loads it
+    scripts/improve/install-nightly.sh --remove  # unloads and deletes it
 
   Modelled on com.tasc.autofix.plist, which already exists on this machine for another repo.
   A different Label, so the two never collide.
@@ -19,11 +23,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/joeliu/Downloads/vibe/scripts/improve/night.sh</string>
+        <string>__ROOT__/scripts/improve/night.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/joeliu/Downloads/vibe</string>
+    <string>__ROOT__</string>
 
     <!-- 23:07, off the hour: every scheduler in the world fires at :00. -->
     <key>StartCalendarInterval</key>
@@ -35,9 +39,9 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/joeliu/Library/Logs/VibeImprove/launchd-stdout.log</string>
+    <string>__HOME__/Library/Logs/VibeImprove/launchd-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/joeliu/Library/Logs/VibeImprove/launchd-stderr.log</string>
+    <string>__HOME__/Library/Logs/VibeImprove/launchd-stderr.log</string>
 
     <key>ProcessType</key>
     <string>Background</string>
@@ -57,11 +61,11 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/joeliu/.local/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__CLAUDE_DIR__</string>
         <key>VIBE_IMPROVE_ROOT</key>
-        <string>/Users/joeliu/Downloads/vibe</string>
+        <string>__ROOT__</string>
         <key>VIBE_IMPROVE_CLAUDE</key>
-        <string>/Users/joeliu/.local/bin/claude</string>
+        <string>__CLAUDE__</string>
     </dict>
 </dict>
 </plist>

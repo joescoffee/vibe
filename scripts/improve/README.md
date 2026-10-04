@@ -26,9 +26,14 @@ installed**: loading it lets an agent edit this repository while nobody is watch
 decision to make rather than a side effect of cloning.
 
 ```
-cp scripts/improve/com.vibe.improve.plist ~/Library/LaunchAgents/
-launchctl load -w ~/Library/LaunchAgents/com.vibe.improve.plist
+scripts/improve/install-nightly.sh            # arm it
+scripts/improve/install-nightly.sh --remove   # disarm it
 ```
+
+The plist is a template carrying no username and no absolute checkout path, so it is safe in a
+public repository and works in a clone anywhere; the installer substitutes them, refuses to
+overwrite a plist pointing elsewhere, and verifies the job is actually listed afterwards rather
+than trusting `launchctl load`'s exit code.
 
 ## Its relationship to `/autofix`
 

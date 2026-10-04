@@ -10,12 +10,13 @@
 # Uninstall: launchctl unload -w ~/Library/LaunchAgents/com.vibe.improve.plist
 set -uo pipefail
 
-ROOT="${VIBE_IMPROVE_ROOT:-/Users/joeliu/Downloads/vibe}"
+# Derived from this script's own location, so a clone anywhere works.
+ROOT="${VIBE_IMPROVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 # Point cargo outside the project tree. Under launchd the default would work, but this script is
 # also run by hand, and from a sandboxed shell a build script writing under `target/` gets EPERM
 # -- which `evaluate.py` correctly calls BLOCKED, and a night of BLOCKED is a wasted night.
 export VIBE_IMPROVE_TARGET_DIR="${VIBE_IMPROVE_TARGET_DIR:-${TMPDIR:-/tmp}/vibe-improve-target}"
-CLAUDE="${VIBE_IMPROVE_CLAUDE:-$HOME/.local/bin/claude}"
+CLAUDE="${VIBE_IMPROVE_CLAUDE:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 DEADLINE_HOUR="${VIBE_IMPROVE_DEADLINE:-5}"
 LOG_DIR="$HOME/Library/Logs/VibeImprove"
 
@@ -52,7 +53,7 @@ while :; do
   # --print is one-shot, which is why this loop is bash rather than one long session: each cycle
   # starts with a clean context and the backlog as its only memory.
   "$CLAUDE" --print "$(cat <<'PROMPT'
-You are one cycle of an unattended improvement run in /Users/joeliu/Downloads/vibe.
+You are one cycle of an unattended improvement run in this repository.
 
 `scripts/improve/night.py begin` has already run and opened the branch. Run it again to see the
 item it picked and the playbook it routes to; read that playbook and follow it.
