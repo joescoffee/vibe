@@ -212,6 +212,7 @@ Three workflows run on pull requests, split so a change pays only for what it to
 | `ci.yml` | `desktop/src/**`, `i18n/**`, `website/**`, `scripts/**`, `chorefile` | eslint, `chore check-types`, `chore check-i18n`, `chore test` |
 | `server-tests.yml` | `server/**` | `chore fetch-libs`, then `cargo test --all` in that workspace |
 | `handoff.yml` | `handoff/**` | `fmt`, `clippy -D warnings` and tests for `handoff/wasm`, the same for `handoff/probe`, and the PWA's pairing tests |
+| `gates.yml` | weekly, and `workflow_dispatch` | `scripts/improve/evaluate.py` — all sixteen gates, no path filter |
 
 Together they cover every task in `chore ci`. `ci.yml` runs the tasks individually rather than
 calling `chore ci`, because that task's `lint` also shells out to cargo — which belongs to
@@ -241,6 +242,25 @@ failure.
 | `pgrep -f …/vibe` 回報「有兩個 vibe 在跑」 | 同一個 pattern 也命中 `vibe-server` sidecar | 錨定成 `^/Applications/vibe.app/Contents/MacOS/vibe$` |
 | `tauri build` 的 DMG 階段失敗，錯誤是「裝置已經沒有空間」，但磁碟還有幾百 GB | `create-dmg` 把暫存的 `rw.<pid>.<name>.dmg` 寫在**來源資料夾內**，並用 `du -s` 於該資料夾估算映像大小。失敗時那個暫存檔會留下，下一次就得把它也塞進映像——每失敗一次，來源就多 91 MB，直到映像裝不下。成功的執行會自己清掉，所以殘留必然代表上一次失敗 | 建置前 `rm -f desktop/src-tauri/target/release/bundle/macos/rw.*.dmg`（或你的 `CARGO_TARGET_DIR` 下對應路徑）。注意 `tauri build` 在這一步失敗時整體仍可能回報 exit 0，所以要 `ls` dmg 目錄確認產物 |
 | 想重現昨天的 bug，log 卻是空的 | `cleaner.rs` 的清理在 `setup.rs:44`，早於 `:123` 的 CLI 分支——連不開視窗的 `vibe transcribe` 也會刪掉非今日的 log | 任何執行 bundle 的動作之前，先把整個 log 目錄複製到別處（`verify-vibe` 的 gate 0 就是做這件事） |
+
+## The regular improvement loop
+
+`scripts/improve/` is a PDCA cycle over this repo. `chore improve` names the next backlog item and
+the poteto-mode playbook it routes to; `chore gates` runs all sixteen checks and answers ACCEPT
+(exit 0), REJECT (1) or BLOCKED (2). Weekly, `gates.yml` runs the same gate with nothing
+path-filtered out — which is the point, because the three PR workflows are scoped and a change in
+`desktop/src/` that breaks `handoff/pwa` is invisible to all of them.
+
+`chore ci` covers nine of the sixteen. It never compiles `server/` and never reaches `handoff/`.
+
+Both levers self-test inside `chore ci` (`chore improve-selftest`). `evaluate.py --self-test`
+proves all three verdicts are reachable; `route.py --self-test` proves a banned or missing playbook
+route is refused. A lever nobody checks is a lever that rots.
+
+This is not `/autofix`. That skill describes the same shape and none of its machinery is installed
+here — no `scripts/autofix/`, no `autofix_*` MCP tools, no npm scripts, and the skill directory
+holds one file. `scripts/improve/README.md` has the measurement and says which of its ideas were
+worth taking.
 
 ## pstack playbooks, and the three not to run
 

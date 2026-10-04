@@ -1,0 +1,107 @@
+{
+  "$comment": [
+    "The real remaining work on this tree, and which poteto-mode playbook each item routes to.",
+    "Not a generated scan. Every item below is something a human or a review actually found and",
+    "nobody has done yet, so an empty backlog means finished rather than unscanned -- the",
+    "distinction `autofix`'s 86-issue generated list does not make.",
+    "",
+    "`routes_to` is a file under ~/.claude/skills/poteto-mode/playbooks/. Three playbooks are",
+    "banned in this repo (autopilot-full, autopilot-stack, autonomous-run): they require the",
+    "metacognition Stop hook to be raised or disabled, and that hook caught six false greens in a",
+    "day. scripts/improve/route.py refuses to emit them.",
+    "",
+    "`needs_human` marks what an agent must not decide alone. Deleting source, changing a",
+    "deployment origin, and touching the user's own transcripts are not an agent's call."
+  ],
+  "updated": "2026-10-05",
+  "items": [
+    {
+      "id": "normalize-on-import",
+      "title": "Loudness normalization never runs on imported files",
+      "found": "deep review 2026-10-04, defect 11",
+      "detail": "ffmpeg::normalize has one call site, the record-finish path. The settings copy now says so, which made the UI honest but did not add the behaviour. Whisper inventing boilerplate on quiet audio is the failure this would prevent, and imports are where long quiet audio arrives.",
+      "class": "feature",
+      "routes_to": "feature.md",
+      "needs_human": false,
+      "blocked_by": "interacts with the non-speech trim and the ScratchFile guard in cmd/transcribe.rs; needs a design pass before code"
+    },
+    {
+      "id": "pdf-cjk-font",
+      "title": "PDF export refuses CJK instead of rendering it",
+      "found": "deep review 2026-10-04, defect 2; refusal shipped in 8585ebd9",
+      "detail": "Rubik has no Han, Kana or Hangul. The export now throws with a message naming DOCX/HTML/TXT/SRT/VTT rather than writing mojibake. Bundling a CJK face would make it work; it costs several MB in the bundle. The user transcribes Chinese.",
+      "class": "feature",
+      "routes_to": "feature.md",
+      "needs_human": true,
+      "human_decides": "whether a multi-megabyte font belongs in the bundle"
+    },
+    {
+      "id": "dead-modules",
+      "title": "20 modules unreachable from main.tsx",
+      "found": "module-graph.test.ts baseline, 2026-10-05",
+      "detail": "15 are components/ui shadcn primitives kept deliberately; 5 are leftovers from the old home page. The ratchet stops new ones appearing. Deleting any of these is a one-line edit to KNOWN_UNREACHABLE plus the file.",
+      "class": "cleanup",
+      "routes_to": "refactoring.md",
+      "needs_human": true,
+      "human_decides": "which of the five home-page leftovers to delete; the ui primitives should stay"
+    },
+    {
+      "id": "transcript-quality-fixtures",
+      "title": "The degenerate-repetition measure cannot gate anything in CI",
+      "found": "chorefile comment on task transcript-quality",
+      "detail": "The measure separates cleanly (runs of 6/16/19 against 0) and its self-test is wired into the loop. What it has no corpus for is CI: the only transcripts are the user's own projects folder, and there are no committed audio fixtures to run the engine over.",
+      "class": "test-infrastructure",
+      "routes_to": "eval.md",
+      "needs_human": false
+    },
+    {
+      "id": "feature-map-gaps",
+      "title": "verify-vibe's feature map covers none of six surfaces that have defects",
+      "found": "deep review 2026-10-04, closing section",
+      "detail": "Nothing in .claude/skills/verify-vibe/features/ covers dictation, meeting detection, the AI summary path, the local API server, model download, recording or settings. Six of those carried a severity-1 or severity-2 defect. The map's own principle -- that proving one entry point leaves the others unproven -- applies to the map.",
+      "class": "verification",
+      "routes_to": "eval.md",
+      "needs_human": false
+    },
+    {
+      "id": "pwa-origin",
+      "title": "The phone credential shares an origin with every page on that host",
+      "found": "deep review 2026-10-04, defect 28",
+      "detail": "localStorage is partitioned by origin, not path, and the default deployment is thewh1teagle.github.io/vibe/phone/. VIBE_PWA_ORIGIN already supports serving from a dedicated origin. Documented at the storage site and in handoff/README.md; not fixable in the PWA.",
+      "class": "deployment",
+      "routes_to": "local-threat-model-lite.md",
+      "needs_human": true,
+      "human_decides": "whether to stand up a dedicated origin for the PWA"
+    },
+    {
+      "id": "server-version-drift",
+      "title": ".server-version describes a baseline the shipped sidecar is not",
+      "found": "CLAUDE.md, extended 2026-10-05",
+      "detail": "It says v0.6.10 while binaries/ holds a local build carrying the whisper-rs rolling-context patch and the HTTP Origin guard. Neither reaches a user without a server release. The two strings greps in CLAUDE.md prove what is staged; nothing proves what is released.",
+      "class": "release",
+      "routes_to": "shipping.md",
+      "needs_human": true,
+      "human_decides": "when to cut a server release carrying both patches"
+    },
+    {
+      "id": "unpushed",
+      "title": "Commits on main that nobody else can see",
+      "found": "git rev-list @{u}..HEAD",
+      "detail": "The evaluator prints this count in its identity line on every run, so it cannot drift unnoticed.",
+      "class": "release",
+      "routes_to": "opening-a-pr.md",
+      "needs_human": true,
+      "human_decides": "whether to push"
+    },
+    {
+      "id": "tcc-probe-artifact",
+      "title": "A test project of mine is sitting in the user's transcripts folder",
+      "found": "2026-10-02",
+      "detail": "~/Documents/Vibe/File-tcc-probe-20261002-085742 is mine. Everything else in that folder is the user's real work and is off limits.",
+      "class": "cleanup",
+      "routes_to": "pause-safely.md",
+      "needs_human": true,
+      "human_decides": "permission to delete it"
+    }
+  ]
+}

@@ -253,4 +253,33 @@ task ci {
     check-i18n
     test
     test-rust
+    # The improvement loop's two levers. Cheap, and a lever nobody checks is a lever that rots:
+    # both self-tests exist to prove the thing can still fail.
+    improve-selftest
+}
+
+# The gate a regular improvement run must pass before it may commit.
+#
+# `ci` above is the pull-request gate: nine checks, fast, scoped to what a PR touches. It never
+# compiles `server/` and never reaches `handoff/`, and both have shipped defects that nothing
+# mechanical would have caught. This runs all sixteen and answers once -- ACCEPT, REJECT or
+# BLOCKED -- with the verdict in the exit code, which is what makes it a gate rather than a report.
+task gates {
+    uv run scripts/improve/evaluate.py
+}
+
+# What the improvement loop should pick up next, and which poteto-mode playbook it routes to.
+task improve {
+    uv run scripts/improve/route.py
+}
+
+# The whole backlog, including the items waiting on a human decision.
+task improve-all {
+    uv run scripts/improve/route.py --all
+}
+
+# Prove both levers can still fail. Part of `ci` on purpose.
+task improve-selftest {
+    uv run scripts/improve/evaluate.py --self-test
+    uv run scripts/improve/route.py --self-test
 }

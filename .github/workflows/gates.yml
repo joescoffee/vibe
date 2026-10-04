@@ -1,0 +1,96 @@
+name: Weekly Gates
+
+# Everything, once a week, with nothing path-filtered out.
+#
+# The three pull-request workflows are deliberately scoped: a Rust-only change does not pay for a
+# frontend run, and `server/` only builds when `server/` changes. That is right for a PR and wrong
+# for drift. A change in `desktop/src/` that breaks `handoff/pwa` is invisible to all three, and
+# so is an upstream dependency that goes red on its own. This job exists for exactly those.
+#
+# It runs `scripts/improve/evaluate.py`, the same gate a regular improvement run has to pass
+# locally, so CI and that loop cannot disagree about what "green" means. The verdict is the exit
+# code: ACCEPT 0, REJECT 1, BLOCKED 2 -- and BLOCKED, meaning a gate could not run, fails the job
+# rather than passing quietly.
+
+on:
+    schedule:
+        # Mondays 03:00 UTC. Nothing depends on the hour; it is out of the way.
+        - cron: '0 3 * * 1'
+    workflow_dispatch:
+
+env:
+    RUST_BACKTRACE: 1
+
+concurrency:
+    group: ${{ github.workflow }}
+    cancel-in-progress: false
+
+jobs:
+    gates:
+        runs-on: macos-latest
+        timeout-minutes: 90
+
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy, rustfmt
+
+            - name: setup pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  package_json_file: desktop/package.json
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+                  cache-dependency-path: desktop/pnpm-lock.yaml
+
+            - name: setup chore
+              uses: getchore/setup-chore@v1
+              with:
+                  version: v1.6.0
+
+            - name: install uv
+              uses: astral-sh/setup-uv@v5
+
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: |
+                      .
+                      server
+                      handoff/wasm
+                      handoff/probe
+
+            - name: install node deps
+              run: pnpm install
+              working-directory: ./desktop
+
+            - name: install node deps (website)
+              run: pnpm install
+              working-directory: ./website
+
+            - name: generate i18n
+              run: chore i18n
+
+            # `tauri_build` validates externalBin, so the root workspace will not even build
+            # with an empty binaries/ -- the sidecars have to be present before cargo runs.
+            - name: fetch sidecars
+              run: chore setup
+
+            # server/libs/lib is gitignored and ggml-rs-sys/build.rs panics without it.
+            - name: fetch ggml libs
+              run: chore fetch-libs
+
+            - name: all gates
+              run: uv run scripts/improve/evaluate.py --json gates.json
+
+            # Uploaded whether or not the step above passed: a REJECT is the run worth reading.
+            - name: upload the verdict
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: gates-verdict
+                  path: gates.json
+                  if-no-files-found: warn
