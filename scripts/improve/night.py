@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -66,6 +68,78 @@ def load() -> dict:
 def save(state: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+LOG_DIR = Path.home() / "Library" / "Logs" / "VibeImprove"
+LAUNCHD_LABEL = "com.vibe.improve"
+
+
+def launchd_state() -> dict | None:
+    """What launchd knows about the nightly job, or None when it holds no such job.
+
+    `None` and `{"runs": 0}` are different answers. The first means nothing is armed. The
+    second means something is armed and has never fired, which is a schedule that has not
+    come round yet. Collapsing them is the bug this function exists to avoid.
+    """
+    probe = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"],
+                           capture_output=True, text=True)
+    if probe.returncode != 0:
+        return None
+    runs = re.search(r"runs = (\d+)", probe.stdout)
+    code = re.search(r"last exit code = (\d+)", probe.stdout)
+    return {
+        "armed": True,
+        "runs": int(runs.group(1)) if runs else 0,
+        "last_exit": int(code.group(1)) if code else None,
+    }
+
+
+def night_logs() -> list[dict]:
+    """One row per `night.sh` log file. Empty when the durable runner has never written one."""
+    rows = []
+    for path in sorted(LOG_DIR.glob("20*.log")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rows.append({
+            "date": path.stem,
+            "invocations": text.count("night starting"),
+            "cycles": text.count("handing to claude"),
+            # `night.sh` writes this as its last act. Its absence after a start is the only
+            # evidence in the log that the run did not finish on its own terms.
+            "finished": text.count("night finished"),
+            "last_line": next((l for l in reversed(text.split("\n")) if l.strip()), ""),
+        })
+    return rows
+
+
+def gather_evidence() -> dict:
+    """Three independent sources, never one.
+
+    `state.json` is written by `begin`, so a job that dies before `begin` leaves none. That is
+    exactly the failure worth reporting, and the only source that can see it is launchd.
+    """
+    return {"state": load() if STATE.is_file() else None,
+            "launchd": launchd_state(),
+            "logs": night_logs()}
+
+
+def classify_night(evidence: dict) -> str:
+    """`ran`, `fired and failed`, or `nothing scheduled`.
+
+    Order matters. State first, because a night that got as far as `begin` is a night that ran
+    whatever launchd later reports. Then a fired-but-stateless job, which is the dead night.
+    Everything else is a schedule that has not produced anything, armed or not.
+    """
+    if evidence["state"] and evidence["state"].get("night"):
+        return "ran"
+    launchd = evidence["launchd"]
+    if launchd and launchd["runs"] > 0:
+        return "fired and failed"
+    # A start is not a failure. `night.sh` can exit cleanly with no cycles when the deadline has
+    # already passed, which is what my own 07:18 hand-run did, and the first version of this
+    # classifier called that a dead night. Count starts that never reached the finish marker.
+    if any(row["invocations"] > row["finished"] for row in evidence["logs"]):
+        return "fired and failed"
+    return "nothing scheduled"
 
 
 def refuse(reason: str) -> int:
@@ -167,11 +241,38 @@ def cmd_finish(args) -> int:
 
 
 def cmd_report(args) -> int:
-    state = load()
+    evidence = gather_evidence()
+    verdict = classify_night(evidence)
+    state = evidence["state"] or load()
     out = STATE_DIR / "report.md"
-    if not state.get("night"):
+
+    if verdict != "ran":
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        out.write_text("# Improvement run\n\nNo night has run yet.\n", encoding="utf-8")
+        lines = ["# Improvement run", ""]
+        if verdict == "fired and failed":
+            launchd = evidence["launchd"] or {}
+            lines += [
+                "**The run fired and died before it did anything.** No cycle was attempted and "
+                "nothing in the repository changed.",
+                "",
+                f"- launchd: {'armed, ' + str(launchd.get('runs')) + ' run(s), last exit code ' + str(launchd.get('last_exit')) if launchd else 'no such job (the durable schedule is not armed)'}",
+            ]
+            for row in evidence["logs"]:
+                lines.append(f"- log {row['date']}: {row['invocations']} invocation(s), "
+                             f"{row['cycles']} cycle(s), last line `{row['last_line'][:120]}`")
+            stderr = LOG_DIR / "launchd-stderr.log"
+            if stderr.is_file() and stderr.stat().st_size:
+                body = stderr.read_text(encoding="utf-8", errors="replace").strip().split("\n")
+                lines += ["", "What it said before exiting:", "", "```"] + body[-6:] + ["```"]
+            lines += ["", "An exit code with no cycles means the runner never reached "
+                      "`night.py begin`, so none of its refusals applied. Look at the runner, "
+                      "not at the backlog."]
+        else:
+            lines += ["No night has run yet.", "",
+                      f"- launchd: {'armed, never fired' if evidence['launchd'] else 'no such job'}",
+                      f"- runner logs: {len(evidence['logs'])} file(s), "
+                      f"{sum(r['invocations'] for r in evidence['logs'])} invocation(s)"]
+        out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(out)
         return 0
 
@@ -272,6 +373,13 @@ def self_test() -> int:
         ({"state": None, "launchd": {"armed": True, "runs": 1, "last_exit": 126}, "logs": []}, "fired and failed"),
         ({"state": None, "launchd": {"armed": True, "runs": 0, "last_exit": None}, "logs": []}, "nothing scheduled"),
         ({"state": {"night": "2026-10-06", "cycles": []}, "launchd": None, "logs": []}, "ran"),
+        # A clean no-op run. `night.sh` exits with no cycles when the deadline has passed, and
+        # the first classifier read that start as a death. Caught by reading the output, not by
+        # the suite, which is why it is a case now.
+        ({"state": None, "launchd": None,
+          "logs": [{"invocations": 1, "finished": 1, "cycles": 0}]}, "nothing scheduled"),
+        ({"state": None, "launchd": None,
+          "logs": [{"invocations": 1, "finished": 0, "cycles": 0}]}, "fired and failed"),
     ]
     for evidence, want in cases:
         got = classify_night(evidence)
