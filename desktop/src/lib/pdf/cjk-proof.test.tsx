@@ -56,7 +56,16 @@ function extract(bytes: Uint8Array): string {
 	const dir = mkdtempSync(join(tmpdir(), 'vibe-pdf-'))
 	const file = join(dir, 'out.pdf')
 	writeFileSync(file, bytes)
-	return execFileSync('pdftotext', [file, '-'], { encoding: 'utf8' })
+	try {
+		return execFileSync('pdftotext', [file, '-'], { encoding: 'utf8' })
+	} catch (error) {
+		// A missing tool and a mojibake PDF must not read the same. This test exists because the
+		// original bug produced a structurally valid file, so "could not check" has to be loud.
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+			throw new Error('pdftotext is not installed, so this test cannot check anything. Install poppler.')
+		}
+		throw error
+	}
 }
 
 describe('CJK in a real PDF', () => {

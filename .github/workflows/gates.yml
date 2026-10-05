@@ -71,6 +71,18 @@ jobs:
               run: pnpm install
               working-directory: ./website
 
+            # The root package.json owns `check-types`, which runs tsc over both projects. Its
+            # own node_modules is where tsc comes from, and installing only the two children
+            # leaves `sh: tsc: command not found`.
+            - name: install node deps (root)
+              run: pnpm install
+
+            # `cjk-proof.test.tsx` extracts text from a rendered PDF with pdftotext, which is
+            # how it tells a real render from the mojibake it guards against. Without poppler
+            # the test cannot run, and a test that cannot run must not look like a pass.
+            - name: install poppler
+              run: brew list poppler >/dev/null 2>&1 || brew install poppler
+
             - name: generate i18n
               run: chore i18n
 
