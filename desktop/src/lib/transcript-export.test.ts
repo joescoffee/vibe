@@ -145,7 +145,16 @@ describe('CSV formula injection', () => {
 
 	it('neutralises a leading formula character and leaves other text alone', () => {
 		const csv = serializeTranscriptExport('csv', dangerous, '', { ...options, showSpeakers: false })
-		const cells = csv.split('\n').slice(1).map((line) => line.split(',').at(-1))
+		// Not `.at(-1)`. This tsconfig sets lib to ES2020 and `.at` is ES2022. It type-checked
+		// here and failed on a CI runner with the same TypeScript version, so it was resolving
+		// through a lib some dependency happened to pull in.
+		const cells = csv
+			.split('\n')
+			.slice(1)
+			.map((line) => {
+				const parts = line.split(',')
+				return parts[parts.length - 1]
+			})
 		expect(cells).toEqual([
 			`"'=cmd|' /c calc'!A1"`,
 			`"'+1+1"`,
