@@ -1,5 +1,15 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// `eyre` is pinned to a fork (thewh1teagle/eyre, branch feat/report-serialize-backtrace) whose
+// `bail!` expands with a trailing semicolon. Used in expression position, as in a match arm, that
+// trips rustc's `semicolon_in_expressions_from_macros` future-incompatibility lint, which is
+// deny-by-default on newer toolchains. Nine call sites across six files, the oldest from
+// 2024-08-08, all of them correct Rust that a dependency's macro makes noisy.
+//
+// Allowed at the crate root because the semicolon is inside the macro, so no call site can fix
+// it. Remove this when the pin moves to an eyre that has the fix. It shows up only on a toolchain
+// newer than 1.98, which is why `cargo clippy` is clean locally and `lint_rust.yml` is not.
+#![allow(semicolon_in_expressions_from_macros)]
 
 mod analytics;
 mod cleaner;
