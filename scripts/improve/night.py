@@ -263,7 +263,24 @@ def self_test() -> int:
         shutil.rmtree(STATE_DIR, ignore_errors=True)
         STATE_DIR, LOCK = keep_dir, keep_lock
 
-    print("6. a dirty tree is refused")
+    print("6. the report tells a dead night from a night that never ran")
+    # The morning of 2026-10-06: the job fired at 23:07, exited 126 before `begin` could write
+    # state.json, and the report said "No night has run yet" -- the same string it prints when
+    # nothing was ever scheduled. One string for two situations is why the operator had to ask.
+    cases = [
+        ({"state": None, "launchd": None, "logs": []}, "nothing scheduled"),
+        ({"state": None, "launchd": {"armed": True, "runs": 1, "last_exit": 126}, "logs": []}, "fired and failed"),
+        ({"state": None, "launchd": {"armed": True, "runs": 0, "last_exit": None}, "logs": []}, "nothing scheduled"),
+        ({"state": {"night": "2026-10-06", "cycles": []}, "launchd": None, "logs": []}, "ran"),
+    ]
+    for evidence, want in cases:
+        got = classify_night(evidence)
+        ok = got == want
+        failures += 0 if ok else 1
+        print(f"   {'ok' if ok else 'MISMATCH'}  {want:18} <- state={evidence['state'] is not None} "
+              f"launchd={evidence['launchd']}")
+
+    print("7. a dirty tree is refused")
     ok = refuse("probe") == 2
     failures += 0 if ok else 1
     print(f"   {'ok' if ok else 'MISMATCH'}  refuse() exits 2")
