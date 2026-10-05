@@ -30,6 +30,22 @@ scripts/improve/install-nightly.sh            # arm it
 scripts/improve/install-nightly.sh --remove   # disarm it
 ```
 
+**It will refuse to arm from `~/Downloads`, `~/Documents` or `~/Desktop`.** macOS TCC protects
+those three, and a LaunchAgent running `/bin/bash` holds no grant for any of them. Measured with a
+probe job on 2026-10-06: `/private/tmp` and `~/.local/bin` read fine, all three protected folders
+return `Operation not permitted`.
+
+That is not hypothetical here. The first armed night fired at 23:07, exited 126 and changed
+nothing, and `launchctl list` showed it present the whole time — the installer had checked that
+the job was *listed* and called it armed. Listed is not able to run. So the installer now runs the
+same read the real job does, from a real LaunchAgent, before claiming anything; it is checked in
+both directions, refusing under Downloads and arming from a reachable path.
+
+To actually get a durable nightly, move the checkout outside those three folders and run the
+installer again — it derives every path from where it is run, so nothing else changes. Granting
+Full Disk Access to `/bin/bash` also works and gives every shell script on the machine access to
+everything, which is a bad trade for this.
+
 The plist is a template carrying no username and no absolute checkout path, so it is safe in a
 public repository and works in a clone anywhere; the installer substitutes them, refuses to
 overwrite a plist pointing elsewhere, and verifies the job is actually listed afterwards rather

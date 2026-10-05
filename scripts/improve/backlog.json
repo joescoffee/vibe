@@ -13,7 +13,7 @@
     "`needs_human` marks what an agent must not decide alone. Deleting source, changing a",
     "deployment origin, and touching the user's own transcripts are not an agent's call."
   ],
-  "updated": "2026-10-05",
+  "updated": "2026-10-06",
   "items": [
     {
       "id": "normalize-on-import",
@@ -62,6 +62,16 @@
       "routes_to": "shipping.md",
       "needs_human": true,
       "human_decides": "when to cut a server release carrying both patches"
+    },
+    {
+      "id": "checkout-location",
+      "title": "The repo lives in ~/Downloads, where no launchd job can read it",
+      "found": "first armed night, 2026-10-06: fired at 23:07, exit 126, changed nothing",
+      "detail": "macOS TCC protects ~/Downloads, ~/Documents and ~/Desktop. A LaunchAgent running /bin/bash gets Operation not permitted on all three; /private/tmp and ~/.local/bin read fine. So the durable nightly cannot work from here, and the in-session cron -- which inherits the terminal's grant -- dies with the session. Moving the checkout to ~/src or similar fixes it permanently and changes nothing else: install-nightly.sh derives every path from where it is run. The same wall is why the pre-existing com.tasc.autofix agent, pointed at ~/Downloads/ucamp-poc, is not loaded.",
+      "class": "environment",
+      "routes_to": "pause-safely.md",
+      "needs_human": true,
+      "human_decides": "whether to move the checkout out of ~/Downloads, or grant Full Disk Access to /bin/bash"
     }
   ]
 }

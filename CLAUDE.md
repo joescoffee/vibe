@@ -281,7 +281,10 @@ Both levers self-test inside `chore ci` (`chore improve-selftest`). `evaluate.py
 proves all three verdicts are reachable; `route.py --self-test` proves a banned or missing playbook
 route is refused. A lever nobody checks is a lever that rots.
 
-Nightly is opt-in: `scripts/improve/install-nightly.sh` arms it, `--remove` disarms it. Arming it
+Nightly is opt-in: `scripts/improve/install-nightly.sh` arms it, `--remove` disarms it. **It
+refuses to arm while the checkout is under `~/Downloads`, `~/Documents` or `~/Desktop`** — macOS
+TCC protects those and a LaunchAgent has no grant for them, so the job fires, exits 126 and
+changes nothing. Measured, not assumed; the installer runs the same read the real job does. Arming it
 lets an agent edit this repo unattended, under the rules in `night.py` — branch only, revert on a
 failed gate, stop after two cycles without an ACCEPT, never push. The plist is a template with no
 username or absolute path in it, so it is safe here and works in any clone.
