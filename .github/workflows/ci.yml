@@ -65,6 +65,16 @@ jobs:
               run: pnpm install
               working-directory: ./website
 
+            # `chore check-types` runs the root package.json's script, and tsc resolves from the
+            # root node_modules. Installing only the two children leaves `tsc: command not
+            # found`, which the first Weekly Gates run hit before this workflow ever got there.
+            - name: install node deps (root)
+              run: pnpm install
+
+            # `chore test` runs cjk-proof.test.tsx, which shells out to pdftotext.
+            - name: install poppler
+              run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+
             # Both src/paraglide/ directories are gitignored, so a fresh checkout cannot
             # type-check or run the tests until they are compiled.
             - name: generate i18n

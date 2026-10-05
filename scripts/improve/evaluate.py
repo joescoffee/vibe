@@ -141,7 +141,12 @@ def run_gate(gate: Gate, extra_env: dict | None = None) -> dict:
         "verdict": "PASS" if proc.returncode == 0 else "FAIL",
         "rc": proc.returncode,
         "seconds": seconds,
+        # Three lines was not enough to diagnose from. The first real CI run produced four
+        # failures and the artifact could identify two of them; the other two needed the raw
+        # runner log, which is the thing this file exists to replace. Terminals get a summary,
+        # the JSON keeps everything.
         "detail": "" if proc.returncode == 0 else " / ".join(line.strip() for line in tail[-3:])[:300],
+        "output": "" if proc.returncode == 0 else output[-20000:],
     }
 
 
@@ -165,7 +170,8 @@ def evaluate(only: list[str] | None, extra_env: dict | None = None) -> tuple[str
         secs = f"{row['seconds']:>6.1f}s" if row.get("seconds") is not None else "      -"
         print(f"  {mark:<5} {secs}  {row['gate']}", flush=True)
         if row["detail"]:
-            print(f"           {row['detail']}", flush=True)
+            for line in [l for l in row.get("output", "").strip().split("\n") if l.strip()][-12:]:
+                print(f"           {line[:200]}", flush=True)
     # The summary is derived from the rows, never recomputed from a second pass over the tree.
     if any(r["verdict"] == "FAIL" for r in results):
         verdict = "REJECT"
