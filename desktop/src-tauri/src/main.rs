@@ -2,14 +2,21 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // `eyre` is pinned to a fork (thewh1teagle/eyre, branch feat/report-serialize-backtrace) whose
 // `bail!` expands with a trailing semicolon. Used in expression position, as in a match arm, that
-// trips rustc's `semicolon_in_expressions_from_macros` future-incompatibility lint, which is
-// deny-by-default on newer toolchains. Nine call sites across six files, the oldest from
-// 2024-08-08, all of them correct Rust that a dependency's macro makes noisy.
+// trips rustc's trailing-semicolon-in-macro future-incompatibility lint. Nine call sites across
+// six files, the oldest from 2024-08-08, all correct Rust that a dependency's macro makes noisy.
+// `-D warnings` is what turns the warning into an error.
 //
-// Allowed at the crate root because the semicolon is inside the macro, so no call site can fix
-// it. Remove this when the pin moves to an eyre that has the fix. It shows up only on a toolchain
-// newer than 1.98, which is why `cargo clippy` is clean locally and `lint_rust.yml` is not.
+// Two names because the lint was renamed and this repository is built on both sides of it.
+// rustc 1.98.1 knows only `semicolon_in_expressions_from_macros`; the runner's newer stable
+// emits `semicolon_in_expressions_from_non_local_macros` and does not know the old name.
+// `unknown_lints` first, so whichever toolchain is running tolerates the name it has never
+// heard of. Allowing only the new name made the local build fail with three unknown-lint errors.
+//
+// The semicolon is inside the macro, so no call site can fix it. Remove all three when the pin
+// moves to an eyre that has the fix.
+#![allow(unknown_lints)]
 #![allow(semicolon_in_expressions_from_macros)]
+#![allow(semicolon_in_expressions_from_non_local_macros)]
 
 mod analytics;
 mod cleaner;
