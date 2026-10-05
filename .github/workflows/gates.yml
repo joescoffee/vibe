@@ -80,7 +80,14 @@ jobs:
               run: chore setup
 
             # server/libs/lib is gitignored and ggml-rs-sys/build.rs panics without it.
+            #
+            # From `server/`, not the root. `server/` is a separate cargo workspace with its own
+            # chorefile, and `fetch-libs` lives in `server/libs/libs.chore`, which only that
+            # chorefile includes. Run from the root it is simply not a task, which is how the
+            # first scheduled run of this workflow failed: `chore: no task 'fetch-libs' in
+            # .../chorefile or the 2 files it includes`. `server-tests.yml` had it right already.
             - name: fetch ggml libs
+              working-directory: server
               run: chore fetch-libs
 
             # The runner can write under the checkout, so the default target dir is fine here.
